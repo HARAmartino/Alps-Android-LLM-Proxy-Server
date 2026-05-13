@@ -54,6 +54,7 @@ fun MainDashboard(
     onStartClick: () -> Unit,
     onStopClick: () -> Unit,
     onManualReconnectClick: () -> Unit,
+    onRetryAcmeClick: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -111,6 +112,9 @@ fun MainDashboard(
                         ?.let { error ->
                             Text(text = error, color = MaterialTheme.colorScheme.error)
                         }
+                    state.certWarning?.takeIf { it.isNotBlank() }?.let { warning ->
+                        Text(text = warning, color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -128,6 +132,14 @@ fun MainDashboard(
                 }
                 OutlinedButton(onClick = onSettingsClick) {
                     Text(text = "Settings")
+                }
+                if (!state.certWarning.isNullOrBlank()) {
+                    OutlinedButton(
+                        onClick = onRetryAcmeClick,
+                        enabled = !state.acmeInProgress,
+                    ) {
+                        Text(text = if (state.acmeInProgress) "Retrying..." else "Retry Let's Encrypt")
+                    }
                 }
             }
         }

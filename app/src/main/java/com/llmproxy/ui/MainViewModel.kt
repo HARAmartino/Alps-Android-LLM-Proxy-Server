@@ -35,7 +35,7 @@ class MainViewModel(
         serverLifecycleManager.runtimeState,
         networkMonitor.networkState,
     ) { config, tunnelingInfoDialogShown, runtimeState, networkState ->
-        MainUiState(
+            MainUiState(
             config = config,
             serverStatus = runtimeState.status,
             activeConnections = runtimeState.activeConnections,
@@ -49,10 +49,13 @@ class MainViewModel(
             tunnelSessionExpiresAt = runtimeState.tunnelSessionExpiresAt,
             latencyP95Ms = runtimeState.latencyP95Ms,
             latencyP99Ms = runtimeState.latencyP99Ms,
-            showManualTunnelReconnect = runtimeState.showManualTunnelReconnect,
-            hasSeenTunnelingInfoDialog = tunnelingInfoDialogShown,
-        )
-    }.stateIn(
+                showManualTunnelReconnect = runtimeState.showManualTunnelReconnect,
+                hasSeenTunnelingInfoDialog = tunnelingInfoDialogShown,
+                certificateExpiresAt = runtimeState.certificateExpiresAt,
+                acmeInProgress = runtimeState.acmeInProgress,
+                certWarning = runtimeState.certWarning,
+            )
+        }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = MainUiState(),
@@ -95,6 +98,24 @@ class MainViewModel(
         }
     }
 
+    fun onLetsEncryptDomainChanged(value: String) {
+        viewModelScope.launch {
+            settingsRepository.updateLetsEncryptDomain(value)
+        }
+    }
+
+    fun onCloudflareApiTokenChanged(value: String) {
+        viewModelScope.launch {
+            settingsRepository.updateCloudflareApiToken(value)
+        }
+    }
+
+    fun onLetsEncryptAutoRenewChanged(value: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateLetsEncryptAutoRenew(value)
+        }
+    }
+
     fun onTunnelingInfoDialogShown() {
         viewModelScope.launch {
             settingsRepository.markTunnelingInfoDialogShown()
@@ -119,6 +140,12 @@ class MainViewModel(
         viewModelScope.launch {
             app.sslCertGenerator.ensureCertificateFiles()
             effectsFlow.emit(MainUiEffect.ExportCertificate("Share certificate"))
+        }
+    }
+
+    fun onRequestCertificateRequested() {
+        viewModelScope.launch {
+            serverLifecycleManager.requestLetsEncryptCertificate()
         }
     }
 

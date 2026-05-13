@@ -6,10 +6,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,6 +28,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.llmproxy.model.MainUiState
 import com.llmproxy.model.ServerConfig
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+private val certificateExpiryFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())
 
 @Composable
 fun SettingsScreen(
@@ -34,6 +43,10 @@ fun SettingsScreen(
     onBindAddressChanged: (String) -> Unit,
     onNetworkModeChanged: (String) -> Unit,
     onTunnelAuthTokenChanged: (String) -> Unit,
+    onLetsEncryptDomainChanged: (String) -> Unit,
+    onCloudflareApiTokenChanged: (String) -> Unit,
+    onLetsEncryptAutoRenewChanged: (Boolean) -> Unit,
+    onRequestCertificate: () -> Unit,
     onTunnelingInfoDialogShown: () -> Unit,
     onExportCertificate: () -> Unit,
     modifier: Modifier = Modifier,
@@ -99,6 +112,55 @@ fun SettingsScreen(
                 label = { Text("Tunnel Auth Token (ngrok)") },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
+            )
+        }
+
+        Text(text = "Let's Encrypt (Cloudflare DNS-01)", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = state.config.letsEncryptDomain,
+            onValueChange = onLetsEncryptDomainChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Domain") },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            value = state.config.cloudflareApiToken,
+            onValueChange = onCloudflareApiTokenChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Cloudflare API token") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("Auto-renew when < 30 days remain")
+            Switch(
+                checked = state.config.letsEncryptAutoRenew,
+                onCheckedChange = onLetsEncryptAutoRenewChanged,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(
+                onClick = onRequestCertificate,
+                enabled = !state.acmeInProgress,
+            ) {
+                Text("Request Certificate")
+            }
+            if (state.acmeInProgress) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+            }
+        }
+        Text(
+            text = "Certificate expiry: ${state.certificateExpiresAt?.let(certificateExpiryFormatter::format) ?: "Unknown"}",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        state.certWarning?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
             )
         }
 

@@ -22,13 +22,17 @@ import org.bouncycastle.openssl.jcajce.JcaPEMWriter
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 import java.io.File
 import java.io.FileOutputStream
+import java.io.FileReader
 import java.io.FileWriter
 import java.math.BigInteger
+import java.security.PrivateKey
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.security.Security
+import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
+import java.time.Instant
 import java.util.Date
 import java.util.concurrent.TimeUnit
 
@@ -65,6 +69,7 @@ class SslCertGenerator(
 
         if (!certificateFile.exists() || !privateKeyFile.exists() || !keyStoreFile.exists()) {
             generateCertificate(certificateFile, privateKeyFile, keyStoreFile, keyStorePassword)
+            setCertificateSource(CERT_SOURCE_SELF_SIGNED)
         }
 
         val keyStore = KeyStore.getInstance(KEYSTORE_TYPE).apply {
@@ -100,6 +105,66 @@ class SslCertGenerator(
         return File(sslDirectory, CERTIFICATE_FILE_NAME).exists() &&
             File(sslDirectory, PRIVATE_KEY_FILE_NAME).exists() &&
             File(sslDirectory, KEYSTORE_FILE_NAME).exists()
+    }
+
+    fun installCertificate(
+        privateKey: PrivateKey,
+        certificateChain: List<X509Certificate>,
+        source: String,
+    ) {
+        require(certificateChain.isNotEmpty()) { "Certificate chain cannot be empty." }
+
+        val keyStorePassword = getOrCreateKeyStorePassword()
+        val sslDirectory = File(context.filesDir, SSL_DIRECTORY).apply { mkdirs() }
+        val certificateFile = File(sslDirectory, CERTIFICATE_FILE_NAME)
+        val privateKeyFile = File(sslDirectory, PRIVATE_KEY_FILE_NAME)
+        val keyStoreFile = File(sslDirectory, KEYSTORE_FILE_NAME)
+
+        FileWriter(certificateFile).use { writer ->
+            JcaPEMWriter(writer).use { pemWriter ->
+                certificateChain.forEach(pemWriter::writeObject)
+            }
+        }
+        FileWriter(privateKeyFile).use { writer ->
+            JcaPEMWriter(writer).use { pemWriter ->
+                pemWriter.writeObject(privateKey)
+            }
+        }
+
+        val keyStore = KeyStore.getInstance(KEYSTORE_TYPE).apply {
+            load(null)
+            setKeyEntry(KEY_ALIAS, privateKey, keyStorePassword, certificateChain.toTypedArray())
+        }
+
+        FileOutputStream(keyStoreFile).use { outputStream ->
+            keyStore.store(outputStream, keyStorePassword)
+        }
+        setCertificateSource(source)
+    }
+
+    fun certificateExpiresAt(): Instant? {
+        val certificateFile = File(File(context.filesDir, SSL_DIRECTORY), CERTIFICATE_FILE_NAME)
+        if (!certificateFile.exists()) return null
+        return runCatching {
+            FileReader(certificateFile).use { reader ->
+                val certificateFactory = CertificateFactory.getInstance("X.509")
+                val certificates = certificateFactory.generateCertificates(reader.readText().byteInputStream())
+                (certificates.firstOrNull() as? X509Certificate)?.notAfter?.toInstant()
+            }
+        }.getOrNull()
+    }
+
+    fun certificateSource(): String {
+        return passwordPreferences.getString(CERT_SOURCE_KEY, CERT_SOURCE_SELF_SIGNED).orEmpty()
+    }
+
+    fun resetToSelfSigned() {
+        val sslDirectory = File(context.filesDir, SSL_DIRECTORY)
+        File(sslDirectory, CERTIFICATE_FILE_NAME).delete()
+        File(sslDirectory, PRIVATE_KEY_FILE_NAME).delete()
+        File(sslDirectory, KEYSTORE_FILE_NAME).delete()
+        ensureCertificateFiles()
+        setCertificateSource(CERT_SOURCE_SELF_SIGNED)
     }
 
     private fun generateCertificate(
@@ -186,6 +251,10 @@ class SslCertGenerator(
         return encoded.toCharArray()
     }
 
+    private fun setCertificateSource(source: String) {
+        passwordPreferences.edit().putString(CERT_SOURCE_KEY, source).apply()
+    }
+
     data class SslMaterial(
         val keyStore: KeyStore,
         val certificateFile: File,
@@ -203,5 +272,9 @@ class SslCertGenerator(
         private const val KEYSTORE_FILE_NAME = "proxy-keystore.p12"
         private const val KEYSTORE_PASSWORD_FILE = "ssl_keystore_passwords"
         private const val KEYSTORE_PASSWORD_KEY = "proxy_keystore_password"
+        private const val CERT_SOURCE_KEY = "proxy_cert_source"
+
+        const val CERT_SOURCE_SELF_SIGNED = "self_signed"
+        const val CERT_SOURCE_LETS_ENCRYPT = "lets_encrypt"
     }
 }

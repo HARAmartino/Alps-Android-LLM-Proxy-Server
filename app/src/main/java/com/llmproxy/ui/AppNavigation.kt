@@ -67,6 +67,7 @@ fun LlmProxyApp(
                     onStartClick = viewModel::onStartRequested,
                     onStopClick = viewModel::onStopRequested,
                     onManualReconnectClick = viewModel::onManualTunnelReconnectRequested,
+                    onRetryAcmeClick = viewModel::onRequestCertificateRequested,
                     onSettingsClick = { navController.navigate(SETTINGS_ROUTE) },
                 )
             }
@@ -79,6 +80,10 @@ fun LlmProxyApp(
                     onBindAddressChanged = viewModel::onBindAddressChanged,
                     onNetworkModeChanged = viewModel::onNetworkModeChanged,
                     onTunnelAuthTokenChanged = viewModel::onTunnelAuthTokenChanged,
+                    onLetsEncryptDomainChanged = viewModel::onLetsEncryptDomainChanged,
+                    onCloudflareApiTokenChanged = viewModel::onCloudflareApiTokenChanged,
+                    onLetsEncryptAutoRenewChanged = viewModel::onLetsEncryptAutoRenewChanged,
+                    onRequestCertificate = viewModel::onRequestCertificateRequested,
                     onTunnelingInfoDialogShown = viewModel::onTunnelingInfoDialogShown,
                     onExportCertificate = viewModel::onExportCertificateRequested,
                 )

@@ -1,0 +1,3 @@
+-dontwarn org.bouncycastle.**
+-keep class org.bouncycastle.** { *; }
+-keep class io.ktor.** { *; }

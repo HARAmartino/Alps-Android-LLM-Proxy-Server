@@ -10,6 +10,8 @@ data class ServerConfig(
     val letsEncryptDomain: String = "",
     val letsEncryptAutoRenew: Boolean = false,
     val cloudflareApiToken: String = "",
+    /** Optional webhook URL for external log forwarding (encrypted at rest). */
+    val webhookForwardUrl: String = "",
 ) {
     val isReady: Boolean = upstreamUrl.isNotBlank() && apiKey.isNotBlank()
 

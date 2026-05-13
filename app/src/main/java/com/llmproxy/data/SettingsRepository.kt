@@ -35,24 +35,29 @@ class SettingsRepository(
     private val letsEncryptAutoRenewKey = booleanPreferencesKey("lets_encrypt_auto_renew")
 
     val serverConfig: StateFlow<ServerConfig> = combine(
-        context.dataStore.data
-            .catch { exception ->
-                if (exception is IOException) {
-                    emit(emptyPreferences())
-                } else {
-                    throw exception
+        combine(
+            context.dataStore.data
+                .catch { exception ->
+                    if (exception is IOException) {
+                        emit(emptyPreferences())
+                    } else {
+                        throw exception
+                    }
                 }
-            }
-            .map(::toBaseConfig),
-        securePreferences.apiKeyFlow(),
-        securePreferences.tunnelAuthTokenFlow(),
-        securePreferences.cloudflareApiTokenFlow(),
-    ) { baseConfig, apiKey, tunnelAuthToken, cloudflareApiToken ->
-        baseConfig.copy(
-            apiKey = apiKey,
-            tunnelAuthToken = tunnelAuthToken,
-            cloudflareApiToken = cloudflareApiToken,
-        )
+                .map(::toBaseConfig),
+            securePreferences.apiKeyFlow(),
+            securePreferences.tunnelAuthTokenFlow(),
+            securePreferences.cloudflareApiTokenFlow(),
+        ) { baseConfig, apiKey, tunnelAuthToken, cloudflareApiToken ->
+            baseConfig.copy(
+                apiKey = apiKey,
+                tunnelAuthToken = tunnelAuthToken,
+                cloudflareApiToken = cloudflareApiToken,
+            )
+        },
+        securePreferences.webhookForwardUrlFlow(),
+    ) { config, webhookForwardUrl ->
+        config.copy(webhookForwardUrl = webhookForwardUrl)
     }.stateIn(
         scope = applicationScope,
         started = SharingStarted.Eagerly,
@@ -120,6 +125,10 @@ class SettingsRepository(
 
     suspend fun updateCloudflareApiToken(value: String) {
         securePreferences.setCloudflareApiToken(value.trim())
+    }
+
+    suspend fun updateWebhookForwardUrl(value: String) {
+        securePreferences.setWebhookForwardUrl(value.trim())
     }
 
     /** Persists the last known tunnel public URL so it survives app restarts. */

@@ -7,11 +7,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -49,6 +52,9 @@ fun SettingsScreen(
     onRequestCertificate: () -> Unit,
     onTunnelingInfoDialogShown: () -> Unit,
     onExportCertificate: () -> Unit,
+    onExportAccessLogs: () -> Unit,
+    onExportSystemLogs: () -> Unit,
+    onWebhookForwardUrlChanged: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isTunneling = state.config.networkMode == ServerConfig.NETWORK_MODE_TUNNELING
@@ -56,6 +62,7 @@ fun SettingsScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -167,6 +174,38 @@ fun SettingsScreen(
         CertificateManagerCard(
             certificateReady = state.certificateReady,
             onExportCertificate = onExportCertificate,
+        )
+
+        // ── Log export section ──────────────────────────────────────────────
+        Text(text = "Logs", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "Exported files have sensitive fields (API keys, tokens) automatically redacted.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = onExportAccessLogs) {
+                Text("Export Access Logs")
+            }
+            OutlinedButton(onClick = onExportSystemLogs) {
+                Text("Export System Logs")
+            }
+        }
+
+        // ── External log forwarding (stub) ──────────────────────────────────
+        Text(text = "External Log Forwarding", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = state.config.webhookForwardUrl,
+            onValueChange = onWebhookForwardUrlChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Webhook URL (optional)") },
+            singleLine = true,
+            placeholder = { Text("https://example.com/logs") },
+        )
+        Text(
+            text = "When set, log entries will be forwarded to this URL in the background. Leave blank to disable.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

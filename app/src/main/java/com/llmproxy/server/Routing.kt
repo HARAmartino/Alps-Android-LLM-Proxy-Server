@@ -1,6 +1,8 @@
 package com.llmproxy.server
 
 import com.llmproxy.model.ServerConfig
+import com.llmproxy.logging.AccessLogEntry
+import com.llmproxy.logging.AccessLogger
 import com.llmproxy.util.Logger
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.ConnectTimeoutException
@@ -28,15 +30,19 @@ import io.ktor.utils.io.copyTo
 import io.ktor.utils.io.flush
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 internal fun Application.installProxyRoutes(
     config: ServerConfig,
     activeConnections: MutableStateFlow<Int>,
     upstreamClient: HttpClient,
+    accessLogger: AccessLogger? = null,
+    loggerScope: CoroutineScope? = null,
     onRequestLatencyMeasured: (Long) -> Unit = {},
 ) {
     routing {
@@ -115,6 +121,27 @@ internal fun Application.installProxyRoutes(
                     val elapsedMs = ((System.nanoTime() - requestStartNs) / 1_000_000L).coerceAtLeast(0L)
                     onRequestLatencyMeasured(elapsedMs)
                     activeConnections.update { current -> (current - 1).coerceAtLeast(0) }
+                    // Fire-and-forget async access log write; never blocks the proxy pipeline.
+                    if (accessLogger != null && loggerScope != null) {
+                        val statusCode = call.response.status()?.value ?: 0
+                        val clientIp = call.request.local.remoteAddress
+                        val upstreamHost = runCatching {
+                            java.net.URI(config.upstreamUrl).host.orEmpty()
+                        }.getOrDefault("")
+                        val requestUri = call.request.local.uri
+                        loggerScope.launch {
+                            accessLogger.log(
+                                AccessLogEntry(
+                                    timestamp = java.time.Instant.now().toString(),
+                                    clientIp = clientIp,
+                                    requestPath = requestUri,
+                                    statusCode = statusCode,
+                                    latencyMs = elapsedMs,
+                                    upstreamHost = upstreamHost,
+                                )
+                            )
+                        }
+                    }
                 }
             }
         }

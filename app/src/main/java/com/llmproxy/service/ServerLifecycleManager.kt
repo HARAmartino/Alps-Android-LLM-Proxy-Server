@@ -6,6 +6,7 @@ import com.llmproxy.client.tunneling.TunnelSession
 import com.llmproxy.client.tunneling.TunnelingClient
 import com.llmproxy.client.tunneling.TunnelingException
 import com.llmproxy.data.SettingsRepository
+import com.llmproxy.logging.AccessLogger
 import com.llmproxy.model.NetworkType
 import com.llmproxy.model.ServerConfig
 import com.llmproxy.model.ServerRuntimeState
@@ -46,6 +47,7 @@ class ServerLifecycleManager(
     private val upstreamClient: HttpClient,
     private val tunnelingClient: TunnelingClient? = null,
     private val networkMonitor: NetworkMonitor? = null,
+    private val accessLogger: AccessLogger? = null,
 ) {
     private val lifecycleMutex = Mutex()
     private val activeConnections = MutableStateFlow(0)
@@ -60,7 +62,12 @@ class ServerLifecycleManager(
     private val latencySamples = ArrayDeque<LatencySample>()
     private val latencyLock = Any()
     private val proxyServerFactory: ProxyServerFactory by lazy {
-        ProxyServerFactory(upstreamClient = upstreamClient, sslContextLoader = sslContextLoader)
+        ProxyServerFactory(
+            upstreamClient = upstreamClient,
+            sslContextLoader = sslContextLoader,
+            accessLogger = accessLogger,
+            loggerScope = applicationScope,
+        )
     }
 
     init {

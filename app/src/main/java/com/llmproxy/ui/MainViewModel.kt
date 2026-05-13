@@ -6,12 +6,15 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.llmproxy.LlmProxyApplication
 import com.llmproxy.data.SettingsRepository
+import com.llmproxy.logging.SystemLogger
 import com.llmproxy.model.MainUiEffect
 import com.llmproxy.model.MainUiState
+import com.llmproxy.model.RecentError
 import com.llmproxy.service.NetworkMonitor
 import com.llmproxy.service.ProxyForegroundService
 import com.llmproxy.service.ServerLifecycleManager
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -24,17 +27,48 @@ class MainViewModel(
     private val settingsRepository: SettingsRepository,
     private val serverLifecycleManager: ServerLifecycleManager,
     private val networkMonitor: NetworkMonitor,
+    private val systemLogger: SystemLogger?,
 ) : AndroidViewModel(application) {
     private val app = application as LlmProxyApplication
     private val effectsFlow = MutableSharedFlow<MainUiEffect>()
     val effects = effectsFlow.asSharedFlow()
+
+    /** Periodically refreshed list of the last 10 ERROR-level system log entries. */
+    private val recentErrorsFlow = MutableStateFlow<List<RecentError>>(emptyList())
+
+    init {
+        // Poll recent errors every 30 s. The loop is tied to viewModelScope:
+        // when the ViewModel is cleared the scope is cancelled and the coroutine stops.
+        viewModelScope.launch {
+            while (kotlinx.coroutines.isActive) {
+                try {
+                    val errors = systemLogger?.recentErrors()
+                        ?.takeLast(10)
+                        ?.map { entry ->
+                            RecentError(
+                                timestamp = entry.timestamp,
+                                tag = entry.tag,
+                                message = entry.message,
+                                stacktrace = entry.stacktrace,
+                            )
+                        }
+                        .orEmpty()
+                    recentErrorsFlow.value = errors
+                } catch (e: Exception) {
+                    android.util.Log.w("MainViewModel", "Failed to refresh recent errors: ${e.message}")
+                }
+                kotlinx.coroutines.delay(30_000L)
+            }
+        }
+    }
 
     val uiState: StateFlow<MainUiState> = combine(
         settingsRepository.serverConfig,
         settingsRepository.tunnelingInfoDialogShown,
         serverLifecycleManager.runtimeState,
         networkMonitor.networkState,
-    ) { config, tunnelingInfoDialogShown, runtimeState, networkState ->
+        recentErrorsFlow,
+    ) { config, tunnelingInfoDialogShown, runtimeState, networkState, recentErrors ->
             MainUiState(
             config = config,
             serverStatus = runtimeState.status,
@@ -54,6 +88,7 @@ class MainViewModel(
                 certificateExpiresAt = runtimeState.certificateExpiresAt,
                 acmeInProgress = runtimeState.acmeInProgress,
                 certWarning = runtimeState.certWarning,
+                recentErrors = recentErrors,
             )
         }.stateIn(
         scope = viewModelScope,
@@ -143,6 +178,24 @@ class MainViewModel(
         }
     }
 
+    fun onExportAccessLogsRequested() {
+        viewModelScope.launch {
+            effectsFlow.emit(MainUiEffect.ExportAccessLogs("Share access logs"))
+        }
+    }
+
+    fun onExportSystemLogsRequested() {
+        viewModelScope.launch {
+            effectsFlow.emit(MainUiEffect.ExportSystemLogs("Share system logs"))
+        }
+    }
+
+    fun onWebhookForwardUrlChanged(value: String) {
+        viewModelScope.launch {
+            settingsRepository.updateWebhookForwardUrl(value)
+        }
+    }
+
     fun onRequestCertificateRequested() {
         viewModelScope.launch {
             serverLifecycleManager.requestLetsEncryptCertificate()
@@ -159,6 +212,7 @@ class MainViewModel(
                 settingsRepository = application.settingsRepository,
                 serverLifecycleManager = application.serverLifecycleManager,
                 networkMonitor = application.networkMonitor,
+                systemLogger = application.systemLogger,
             ) as T
         }
     }

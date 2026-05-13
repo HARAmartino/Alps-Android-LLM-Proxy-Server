@@ -2,6 +2,14 @@ package com.llmproxy.model
 
 import java.time.Instant
 
+/** Lightweight representation of a recent ERROR-level system log entry for the dashboard. */
+data class RecentError(
+    val timestamp: String,
+    val tag: String,
+    val message: String,
+    val stacktrace: String? = null,
+)
+
 enum class ServerStatus {
     Stopped,
     Starting,
@@ -45,9 +53,13 @@ data class MainUiState(
     val certificateExpiresAt: Instant? = null,
     val acmeInProgress: Boolean = false,
     val certWarning: String? = null,
+    /** Last up-to-10 ERROR-level system log entries for the dashboard. */
+    val recentErrors: List<RecentError> = emptyList(),
 )
 
 sealed interface MainUiEffect {
     data class ExportCertificate(val chooserTitle: String) : MainUiEffect
+    data class ExportAccessLogs(val chooserTitle: String) : MainUiEffect
+    data class ExportSystemLogs(val chooserTitle: String) : MainUiEffect
     data class ShowMessage(val message: String) : MainUiEffect
 }

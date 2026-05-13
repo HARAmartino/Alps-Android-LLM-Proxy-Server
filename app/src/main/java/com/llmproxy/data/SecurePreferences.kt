@@ -30,12 +30,17 @@ class SecurePreferences(context: Context) {
     private val cloudflareApiTokenState = MutableStateFlow(
         sharedPreferences.getString(KEY_CLOUDFLARE_API_TOKEN, "").orEmpty()
     )
+    private val webhookForwardUrlState = MutableStateFlow(
+        sharedPreferences.getString(KEY_WEBHOOK_FORWARD_URL, "").orEmpty()
+    )
 
     fun apiKeyFlow(): StateFlow<String> = apiKeyState.asStateFlow()
 
     fun tunnelAuthTokenFlow(): StateFlow<String> = tunnelAuthTokenState.asStateFlow()
 
     fun cloudflareApiTokenFlow(): StateFlow<String> = cloudflareApiTokenState.asStateFlow()
+
+    fun webhookForwardUrlFlow(): StateFlow<String> = webhookForwardUrlState.asStateFlow()
 
     suspend fun setApiKey(apiKey: String) {
         sharedPreferences.edit().putString(KEY_API_KEY, apiKey).apply()
@@ -52,10 +57,16 @@ class SecurePreferences(context: Context) {
         cloudflareApiTokenState.value = token
     }
 
+    suspend fun setWebhookForwardUrl(url: String) {
+        sharedPreferences.edit().putString(KEY_WEBHOOK_FORWARD_URL, url).apply()
+        webhookForwardUrlState.value = url
+    }
+
     companion object {
         private const val FILE_NAME = "secure_settings"
         private const val KEY_API_KEY = "api_key"
         private const val KEY_TUNNEL_AUTH_TOKEN = "tunnel_auth_token"
         private const val KEY_CLOUDFLARE_API_TOKEN = "cloudflare_api_token"
+        private const val KEY_WEBHOOK_FORWARD_URL = "webhook_forward_url"
     }
 }

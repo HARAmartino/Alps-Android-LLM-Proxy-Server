@@ -15,6 +15,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -60,64 +61,69 @@ fun MainDashboard(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text(text = "Android LLM Proxy Server", style = MaterialTheme.typography.headlineSmall)
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(text = "Server status", style = MaterialTheme.typography.titleMedium)
-                Text(text = state.serverStatus.name)
-                Text(text = "Local endpoint: ${state.localEndpoint}")
-                Text(text = "Network: ${state.networkType.name}")
-                Text(text = "Public IP: ${state.publicIp ?: "Unavailable"}")
-                Text(text = "Active connections: ${state.activeConnections}")
+    Scaffold(
+        modifier = modifier,
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(text = "Android LLM Proxy Server", style = MaterialTheme.typography.headlineSmall)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(text = "Server status", style = MaterialTheme.typography.titleMedium)
+                    Text(text = state.serverStatus.name)
+                    Text(text = "Local endpoint: ${state.localEndpoint}")
+                    Text(text = "Network: ${state.networkType.name}")
+                    Text(text = "Public IP: ${state.publicIp ?: "Unavailable"}")
+                    Text(text = "Active connections: ${state.activeConnections}")
 
-                // Tunneling section: show public URL and status when in tunneling mode.
-                if (isTunneling) {
-                    TunnelStatusSection(
-                        tunnelStatus = state.tunnelStatus,
-                        tunnelPublicUrl = state.tunnelPublicUrl,
-                        tunnelSessionExpiresAt = state.tunnelSessionExpiresAt,
-                        tunnelLastError = state.lastError,
-                        onCopyUrl = { url ->
-                            clipboardManager.setText(AnnotatedString(url))
-                            scope.launch {
-                                snackbarHostState.showSnackbar("Public URL copied")
-                            }
-                        },
-                    )
-                }
+                    // Tunneling section: show public URL and status when in tunneling mode.
+                    if (isTunneling) {
+                        TunnelStatusSection(
+                            tunnelStatus = state.tunnelStatus,
+                            tunnelPublicUrl = state.tunnelPublicUrl,
+                            tunnelSessionExpiresAt = state.tunnelSessionExpiresAt,
+                            tunnelLastError = state.lastError,
+                            onCopyUrl = { url ->
+                                clipboardManager.setText(AnnotatedString(url))
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Public URL copied")
+                                }
+                            },
+                        )
+                    }
 
-                state.lastError
-                    ?.takeIf { it.isNotBlank() && (!isTunneling || state.tunnelStatus != TunnelStatus.Error) }
-                    ?.let { error ->
-                    Text(text = error, color = MaterialTheme.colorScheme.error)
+                    state.lastError
+                        ?.takeIf { it.isNotBlank() && (!isTunneling || state.tunnelStatus != TunnelStatus.Error) }
+                        ?.let { error ->
+                            Text(text = error, color = MaterialTheme.colorScheme.error)
+                        }
                 }
             }
-        }
-        SnackbarHost(hostState = snackbarHostState, modifier = Modifier.fillMaxWidth())
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(
-                onClick = onStartClick,
-                enabled = state.serverStatus != ServerStatus.Running && state.config.isReady,
-            ) {
-                Text(text = "Start")
-            }
-            OutlinedButton(
-                onClick = onStopClick,
-                enabled = state.serverStatus == ServerStatus.Running || state.serverStatus == ServerStatus.Starting,
-            ) {
-                Text(text = "Stop")
-            }
-            OutlinedButton(onClick = onSettingsClick) {
-                Text(text = "Settings")
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = onStartClick,
+                    enabled = state.serverStatus != ServerStatus.Running && state.config.isReady,
+                ) {
+                    Text(text = "Start")
+                }
+                OutlinedButton(
+                    onClick = onStopClick,
+                    enabled = state.serverStatus == ServerStatus.Running || state.serverStatus == ServerStatus.Starting,
+                ) {
+                    Text(text = "Stop")
+                }
+                OutlinedButton(onClick = onSettingsClick) {
+                    Text(text = "Settings")
+                }
             }
         }
     }
@@ -195,7 +201,7 @@ private fun TunnelStatusSection(
             }
         }
     }
-    if (tunnelStatus == TunnelStatus.Active) {
+    if (tunnelStatus == TunnelStatus.Active && tunnelSessionExpiresAt != null) {
         Text(
             text = "Session expires at: ${tunnelSessionExpiresAt.toDisplayLabel()}",
             style = MaterialTheme.typography.bodySmall,

@@ -48,7 +48,7 @@ internal fun Application.installProxyRoutes(
                     queryString = call.request.queryString(),
                 )
 
-                val upstreamBodyChannel = AtomicReference<ByteReadChannel?>(null)
+                val upstreamBodyChannelRef = AtomicReference<ByteReadChannel?>(null)
                 activeConnections.update { it + 1 }
                 try {
                     upstreamClient.prepareRequest {
@@ -76,7 +76,7 @@ internal fun Application.installProxyRoutes(
 
                             override suspend fun writeTo(channel: ByteWriteChannel) {
                                 val bodyChannel = upstreamResponse.bodyAsChannel()
-                                upstreamBodyChannel.set(bodyChannel)
+                                upstreamBodyChannelRef.set(bodyChannel)
                                 try {
                                     // Zero-copy relay for SSE/chunked/non-chunked bodies.
                                     bodyChannel.copyTo(channel)
@@ -84,31 +84,31 @@ internal fun Application.installProxyRoutes(
                                 } finally {
                                     // Always release upstream channel resources.
                                     bodyChannel.cancel()
-                                    upstreamBodyChannel.compareAndSet(bodyChannel, null)
+                                    upstreamBodyChannelRef.getAndSet(null)
                                 }
                             }
                         })
                     }
                 } catch (cancellation: CancellationException) {
-                    upstreamBodyChannel.get()?.cancel(cancellation)
+                    upstreamBodyChannelRef.get()?.cancel(cancellation)
                     Logger.d("Routing", "Proxy call cancelled by client")
                     throw cancellation
                 } catch (timeout: HttpRequestTimeoutException) {
-                    upstreamBodyChannel.get()?.cancel(timeout)
+                    upstreamBodyChannelRef.get()?.cancel(timeout)
                     Logger.e("Routing", "Upstream request timeout", timeout)
                     call.respondIfPossible(HttpStatusCode.GatewayTimeout, "Upstream request timeout")
                 } catch (timeout: SocketTimeoutException) {
-                    upstreamBodyChannel.get()?.cancel(timeout)
+                    upstreamBodyChannelRef.get()?.cancel(timeout)
                     Logger.e("Routing", "Upstream socket timeout", timeout)
                     call.respondIfPossible(HttpStatusCode.GatewayTimeout, "Upstream socket timeout")
                 } catch (timeout: ConnectTimeoutException) {
-                    upstreamBodyChannel.get()?.cancel(timeout)
+                    upstreamBodyChannelRef.get()?.cancel(timeout)
                     Logger.e("Routing", "Upstream connect timeout", timeout)
                     call.respondIfPossible(HttpStatusCode.GatewayTimeout, "Upstream connect timeout")
                 } catch (error: Exception) {
-                    upstreamBodyChannel.get()?.cancel(error)
+                    upstreamBodyChannelRef.get()?.cancel(error)
                     Logger.e("Routing", "Proxy request failed", error)
-                    call.respondIfPossible(HttpStatusCode.BadGateway, "Proxy request failed: ${error.message.orEmpty()}")
+                    call.respondIfPossible(HttpStatusCode.BadGateway, "Upstream service unavailable")
                 } finally {
                     activeConnections.update { current -> (current - 1).coerceAtLeast(0) }
                 }

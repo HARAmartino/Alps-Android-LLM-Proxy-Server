@@ -76,10 +76,6 @@ internal fun Application.installProxyRoutes(
                                     // Zero-copy relay for SSE/chunked/non-chunked bodies.
                                     bodyChannel.copyTo(channel)
                                     channel.flush()
-                                } catch (cancellation: CancellationException) {
-                                    // Client disconnected/call cancelled; cancel upstream immediately.
-                                    bodyChannel.cancel(cancellation)
-                                    throw cancellation
                                 } finally {
                                     // Always release upstream channel resources.
                                     bodyChannel.cancel()

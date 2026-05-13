@@ -33,6 +33,8 @@ class NetworkMonitor(
     val networkState: StateFlow<NetworkState> = _networkState.asStateFlow()
 
     private var isRegistered = false
+    private var lastObservedNetworkHandle: Long? = null
+    private var lastPublicIpCheckAtMs: Long = 0L
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) = refreshState()
@@ -46,6 +48,7 @@ class NetworkMonitor(
 
     fun start() {
         if (isRegistered) return
+        // Lifecycle-aware registration: service start owns callback registration.
         connectivityManager.registerDefaultNetworkCallback(networkCallback)
         isRegistered = true
         refreshState()
@@ -81,6 +84,7 @@ class NetworkMonitor(
 
         if (nextType == NetworkType.OFFLINE) {
             _networkState.value = NetworkState(type = NetworkType.OFFLINE, ip = null)
+            lastObservedNetworkHandle = null
             if (previousState.type != NetworkType.OFFLINE) {
                 ddnsUpdateTrigger.onNetworkLost()
             }
@@ -88,7 +92,19 @@ class NetworkMonitor(
         }
 
         if (nextType == NetworkType.WIFI) {
-            val publicIp = fetchPublicIp()
+            val now = System.currentTimeMillis()
+            val currentHandle = activeNetwork?.networkHandle
+            val shouldRefreshPublicIp =
+                currentHandle != lastObservedNetworkHandle ||
+                    now - lastPublicIpCheckAtMs >= PUBLIC_IP_REFRESH_INTERVAL_MS ||
+                    previousState.ip.isNullOrBlank()
+            val publicIp = if (shouldRefreshPublicIp) {
+                lastPublicIpCheckAtMs = now
+                fetchPublicIp()
+            } else {
+                previousState.ip
+            }
+            lastObservedNetworkHandle = currentHandle
             _networkState.value = NetworkState(type = NetworkType.WIFI, ip = publicIp)
             if (!publicIp.isNullOrBlank() && publicIp != previousState.ip) {
                 // DDNS should only be triggered when the observed public IP actually changes.
@@ -97,6 +113,7 @@ class NetworkMonitor(
             return
         }
 
+        lastObservedNetworkHandle = activeNetwork?.networkHandle
         _networkState.value = NetworkState(type = NetworkType.MOBILE, ip = null)
     }
 
@@ -118,5 +135,6 @@ class NetworkMonitor(
 
     private companion object {
         private const val PUBLIC_IP_ENDPOINT = "https://checkip.amazonaws.com"
+        private const val PUBLIC_IP_REFRESH_INTERVAL_MS = 15_000L
     }
 }

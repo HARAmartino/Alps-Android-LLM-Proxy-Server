@@ -141,7 +141,7 @@ private fun NetworkModeSelector(
         }
 
         Text(
-            text = "Local: Accessible only within your Wi‑Fi network. No external setup required.",
+            text = "Local: Accessible only within your Wi-Fi network. No external setup required.",
             style = MaterialTheme.typography.bodySmall,
             color = if (selectedMode == ServerConfig.NETWORK_MODE_LOCAL) {
                 MaterialTheme.colorScheme.onSurface

@@ -195,11 +195,13 @@ private fun TunnelStatusSection(
             }
         }
     }
-    Text(
-        text = "Session expires at: ${tunnelSessionExpiresAt.toDisplayLabel()}",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    if (tunnelStatus == TunnelStatus.Active) {
+        Text(
+            text = "Session expires at: ${tunnelSessionExpiresAt.toDisplayLabel()}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     if (tunnelStatus == TunnelStatus.Error && !tunnelLastError.isNullOrBlank()) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(

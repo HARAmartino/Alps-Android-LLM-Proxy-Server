@@ -11,15 +11,18 @@ class UpstreamHttpClientFactory {
             install(HttpTimeout) {
                 requestTimeoutMillis = 120_000
                 connectTimeoutMillis = 30_000
-                socketTimeoutMillis = 120_000
+                socketTimeoutMillis = 60_000
             }
             engine {
                 maxConnectionsCount = 128
                 endpoint {
+                    // CIO uses "per route" as host+port connection pooling scope.
+                    maxConnectionsPerRoute = 10
                     connectAttempts = 2
                     keepAliveTime = 5_000
                     connectTimeout = 30_000
                     requestTimeout = 120_000
+                    socketTimeout = 60_000
                     pipelineMaxSize = 20
                 }
             }

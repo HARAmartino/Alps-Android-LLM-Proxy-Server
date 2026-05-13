@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">LLM Proxy Server</string>
+    <string name="notification_channel_name">Proxy server</string>
+    <string name="notification_channel_description">Foreground notification for the local LLM proxy server</string>
+    <string name="notification_title">LLM Proxy Server</string>
+</resources>

@@ -6,10 +6,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
@@ -37,6 +40,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.llmproxy.model.MainUiState
+import com.llmproxy.model.RecentError
 import com.llmproxy.model.ServerConfig
 import com.llmproxy.model.ServerStatus
 import com.llmproxy.model.TunnelStatus
@@ -71,6 +75,7 @@ fun MainDashboard(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -141,6 +146,11 @@ fun MainDashboard(
                         Text(text = if (state.acmeInProgress) "Retrying..." else "Retry Let's Encrypt")
                     }
                 }
+            }
+
+            // Recent Errors section — shows last 10 ERROR-level system log entries.
+            if (state.recentErrors.isNotEmpty()) {
+                RecentErrorsSection(errors = state.recentErrors)
             }
         }
     }
@@ -254,3 +264,79 @@ private fun TunnelStatusSection(
 }
 
 private fun Instant?.formatTunnelExpiry(): String = this?.let { tunnelExpiryTimeFormatter.format(it) } ?: "Unknown"
+
+/**
+ * Expandable card showing the last up-to-10 ERROR-level system log entries.
+ * Each entry can be tapped to reveal its full stacktrace in an [AlertDialog].
+ */
+@Composable
+private fun RecentErrorsSection(errors: List<RecentError>) {
+    var isExpanded by rememberSaveable { mutableStateOf(false) }
+    var selectedError by remember { mutableStateOf<RecentError?>(null) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "Recent Errors (${errors.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                TextButton(onClick = { isExpanded = !isExpanded }) {
+                    Text(if (isExpanded) "Collapse" else "Expand")
+                }
+            }
+            if (isExpanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    errors.forEach { error ->
+                        Column {
+                            Text(
+                                text = "[${error.timestamp}] [${error.tag}]",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = error.message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (!error.stacktrace.isNullOrBlank()) {
+                                    TextButton(onClick = { selectedError = error }) {
+                                        Text("Details")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Dialog to show full stacktrace when an error entry is tapped.
+    selectedError?.let { error ->
+        AlertDialog(
+            onDismissRequest = { selectedError = null },
+            title = { Text("[${error.tag}] ${error.message}") },
+            text = {
+                Text(
+                    text = error.stacktrace.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { selectedError = null }) {
+                    Text("Close")
+                }
+            },
+        )
+    }
+}

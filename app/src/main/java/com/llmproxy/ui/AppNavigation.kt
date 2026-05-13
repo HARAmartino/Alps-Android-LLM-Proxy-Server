@@ -86,6 +86,9 @@ fun LlmProxyApp(
                     onRequestCertificate = viewModel::onRequestCertificateRequested,
                     onTunnelingInfoDialogShown = viewModel::onTunnelingInfoDialogShown,
                     onExportCertificate = viewModel::onExportCertificateRequested,
+                    onExportAccessLogs = viewModel::onExportAccessLogsRequested,
+                    onExportSystemLogs = viewModel::onExportSystemLogsRequested,
+                    onWebhookForwardUrlChanged = viewModel::onWebhookForwardUrlChanged,
                 )
             }
         }

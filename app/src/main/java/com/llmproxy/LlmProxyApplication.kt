@@ -12,6 +12,10 @@ import com.llmproxy.client.UpstreamHttpClientFactory
 import com.llmproxy.client.tunneling.NgrokRestClient
 import com.llmproxy.data.SecurePreferences
 import com.llmproxy.data.SettingsRepository
+import com.llmproxy.logging.AccessLogger
+import com.llmproxy.logging.LogForwarder
+import com.llmproxy.logging.NoOpLogForwarder
+import com.llmproxy.logging.SystemLogger
 import com.llmproxy.model.ServerConfig
 import com.llmproxy.server.SslContextLoader
 import com.llmproxy.service.DdnsUpdateTrigger
@@ -41,6 +45,19 @@ class LlmProxyApplication : Application() {
 
     val sslCertGenerator: SslCertGenerator by lazy {
         SslCertGenerator(this)
+    }
+
+    val accessLogger: AccessLogger by lazy {
+        AccessLogger(this)
+    }
+
+    val systemLogger: SystemLogger by lazy {
+        SystemLogger(this)
+    }
+
+    /** Log forwarder; defaults to no-op until a real webhook is configured. */
+    val logForwarder: LogForwarder by lazy {
+        NoOpLogForwarder
     }
 
     val sslContextLoader: SslContextLoader by lazy {
@@ -96,6 +113,7 @@ class LlmProxyApplication : Application() {
             upstreamClient = upstreamHttpClientFactory.create(),
             tunnelingClient = ngrokRestClient,
             networkMonitor = networkMonitor,
+            accessLogger = accessLogger,
         )
     }
 

@@ -38,6 +38,18 @@ class MainActivity : ComponentActivity() {
                         effect.chooserTitle,
                     )
                 )
+                is MainUiEffect.ExportAccessLogs -> startActivity(
+                    android.content.Intent.createChooser(
+                        (application as LlmProxyApplication).accessLogger.createExportIntent(),
+                        effect.chooserTitle,
+                    )
+                )
+                is MainUiEffect.ExportSystemLogs -> startActivity(
+                    android.content.Intent.createChooser(
+                        (application as LlmProxyApplication).systemLogger.createExportIntent(),
+                        effect.chooserTitle,
+                    )
+                )
                 is MainUiEffect.ShowMessage -> Unit
             }
         }.launchIn(lifecycleScope)

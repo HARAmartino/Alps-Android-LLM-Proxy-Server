@@ -5,6 +5,7 @@ import com.llmproxy.client.UpstreamHttpClientFactory
 import com.llmproxy.client.tunneling.NgrokRestClient
 import com.llmproxy.data.SecurePreferences
 import com.llmproxy.data.SettingsRepository
+import com.llmproxy.model.ServerConfig
 import com.llmproxy.server.SslContextLoader
 import com.llmproxy.service.DdnsUpdateTrigger
 import com.llmproxy.service.NetworkMonitor
@@ -50,6 +51,9 @@ class LlmProxyApplication : Application() {
             context = this,
             scope = applicationScope,
             ddnsUpdateTrigger = ddnsUpdateTrigger,
+            isPortForwardingMode = {
+                settingsRepository.serverConfig.value.networkMode == ServerConfig.NETWORK_MODE_LOCAL
+            },
         )
     }
 
@@ -66,6 +70,7 @@ class LlmProxyApplication : Application() {
             sslContextLoader = sslContextLoader,
             upstreamClient = upstreamHttpClientFactory.create(),
             tunnelingClient = ngrokRestClient,
+            networkMonitor = networkMonitor,
         )
     }
 

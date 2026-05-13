@@ -17,6 +17,7 @@ class ProxyServerFactory(
     fun create(
         config: ServerConfig,
         activeConnections: MutableStateFlow<Int>,
+        onRequestLatencyMeasured: (Long) -> Unit = {},
     ): ApplicationEngine {
         val sslMaterial = sslContextLoader.loadSslContext()
 
@@ -38,6 +39,7 @@ class ProxyServerFactory(
                         config = config,
                         activeConnections = activeConnections,
                         upstreamClient = upstreamClient,
+                        onRequestLatencyMeasured = onRequestLatencyMeasured,
                     )
                 }
             },

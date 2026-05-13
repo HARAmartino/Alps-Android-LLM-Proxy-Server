@@ -96,3 +96,5 @@ app/src/main/java/com/llmproxy/
 - Running server configuration changes require restarting the foreground service.
 - Active connection counts are in-memory only.
 - The current certificate SAN covers `localhost` and `127.0.0.1`; LAN IP trust depends on client acceptance of the exported certificate.
+- Tunnel reconnection may take 5-15s after network switch.
+- Latency metrics are approximate and reset on app restart.

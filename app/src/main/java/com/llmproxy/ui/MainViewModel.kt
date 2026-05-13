@@ -47,6 +47,9 @@ class MainViewModel(
             tunnelStatus = runtimeState.tunnelStatus,
             tunnelPublicUrl = runtimeState.tunnelPublicUrl,
             tunnelSessionExpiresAt = runtimeState.tunnelSessionExpiresAt,
+            latencyP95Ms = runtimeState.latencyP95Ms,
+            latencyP99Ms = runtimeState.latencyP99Ms,
+            showManualTunnelReconnect = runtimeState.showManualTunnelReconnect,
             hasSeenTunnelingInfoDialog = tunnelingInfoDialogShown,
         )
     }.stateIn(
@@ -104,6 +107,12 @@ class MainViewModel(
 
     fun onStopRequested() {
         ProxyForegroundService.stop(getApplication())
+    }
+
+    fun onManualTunnelReconnectRequested() {
+        viewModelScope.launch {
+            serverLifecycleManager.manualReconnectTunnel()
+        }
     }
 
     fun onExportCertificateRequested() {

@@ -23,6 +23,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,6 +33,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.ceil
 
 class ServerLifecycleManager(
@@ -114,10 +117,10 @@ class ServerLifecycleManager(
             )
 
             try {
-                val shouldBootstrapLetsEncrypt = config.letsEncryptDomain.isNotBlank() &&
+                val needsLetsEncryptCertificate = config.letsEncryptDomain.isNotBlank() &&
                     config.cloudflareApiToken.isNotBlank() &&
                     sslCertGenerator.certificateSource() != SslCertGenerator.CERT_SOURCE_LETS_ENCRYPT
-                if (shouldBootstrapLetsEncrypt) {
+                if (needsLetsEncryptCertificate) {
                     val acmeResult = runAcmeFlowLocked(config.letsEncryptDomain)
                     if (!acmeResult.success) {
                         _runtimeState.update { state ->
@@ -446,7 +449,6 @@ class ServerLifecycleManager(
         private const val TUNNEL_RECONNECT_BACKOFF_BASE_MS = 2_000L
         private const val TUNNEL_RECONNECT_BACKOFF_MAX_MS = 15_000L
         private const val DRAIN_CONNECTION_TIMEOUT_MS = 30_000L
-        private const val DRAIN_POLL_INTERVAL_MS = 250L
     }
 
     private suspend fun runAcmeFlowLocked(domain: String): AcmeCertManager.AcmeResult {
@@ -506,7 +508,6 @@ class ServerLifecycleManager(
     // 2) Stop current engine
     // 3) Recreate engine with fresh TLS material and start again
     private suspend fun gracefulRestartLocked() {
-        val previousStatus = _runtimeState.value.status
         if (serverEngine == null) return
         val config = settingsRepository.serverConfig.value
         val isTunneling = config.networkMode == ServerConfig.NETWORK_MODE_TUNNELING
@@ -514,9 +515,14 @@ class ServerLifecycleManager(
         val effectiveConfig = config.copy(bindAddress = effectiveBindAddress)
 
         _runtimeState.update { it.copy(status = ServerStatus.Stopping) }
-        val drainDeadline = System.currentTimeMillis() + DRAIN_CONNECTION_TIMEOUT_MS
-        while (activeConnections.value > 0 && System.currentTimeMillis() < drainDeadline) {
-            delay(DRAIN_POLL_INTERVAL_MS)
+        val drainCompleted = withTimeoutOrNull(DRAIN_CONNECTION_TIMEOUT_MS) {
+            activeConnections.filter { it == 0 }.first()
+        }
+        if (drainCompleted == null && activeConnections.value > 0) {
+            Logger.e(
+                "ServerLifecycleManager",
+                "Graceful restart drain timeout after ${DRAIN_CONNECTION_TIMEOUT_MS / 1000}s; forcing restart with ${activeConnections.value} active connections."
+            )
         }
 
         runCatching {
@@ -526,8 +532,5 @@ class ServerLifecycleManager(
         closeTunnelLocked()
         sslCertGenerator.ensureCertificateFiles()
         startEngineLocked(config = config, effectiveConfig = effectiveConfig, isTunneling = isTunneling)
-        if (previousStatus == ServerStatus.Stopped) {
-            _runtimeState.update { it.copy(status = ServerStatus.Stopped) }
-        }
     }
 }

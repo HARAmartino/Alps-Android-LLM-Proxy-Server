@@ -22,7 +22,6 @@ import org.bouncycastle.openssl.jcajce.JcaPEMWriter
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 import java.io.File
 import java.io.FileOutputStream
-import java.io.FileReader
 import java.io.FileWriter
 import java.math.BigInteger
 import java.security.PrivateKey
@@ -146,9 +145,9 @@ class SslCertGenerator(
         val certificateFile = File(File(context.filesDir, SSL_DIRECTORY), CERTIFICATE_FILE_NAME)
         if (!certificateFile.exists()) return null
         return runCatching {
-            FileReader(certificateFile).use { reader ->
+            certificateFile.inputStream().use { inputStream ->
                 val certificateFactory = CertificateFactory.getInstance("X.509")
-                val certificates = certificateFactory.generateCertificates(reader.readText().byteInputStream())
+                val certificates = certificateFactory.generateCertificates(inputStream)
                 (certificates.firstOrNull() as? X509Certificate)?.notAfter?.toInstant()
             }
         }.getOrNull()

@@ -26,7 +26,7 @@ class CloudflareDnsProvider(
             .put("type", "TXT")
             .put("name", normalizeName(name))
             .put("content", content)
-            .put("ttl", 120)
+            .put("ttl", ACME_CHALLENGE_TTL_SECONDS)
             .put("proxied", false)
 
         val response = httpClient.post("$BASE_URL/zones/$zoneId/dns_records") {
@@ -50,15 +50,27 @@ class CloudflareDnsProvider(
         checkSuccess(recordsResponse, "list TXT")
         val matches = recordsJson.optJSONArray("result").orEmpty()
 
+        val idsToDelete = mutableListOf<String>()
         for (index in 0 until matches.length()) {
             val record = matches.optJSONObject(index) ?: continue
             if (record.optString("content") != content) continue
             val recordId = record.optString("id")
             if (recordId.isBlank()) continue
+            idsToDelete += recordId
+        }
+
+        val deleteErrors = mutableListOf<String>()
+        for (recordId in idsToDelete) {
             val deleteResponse = httpClient.delete("$BASE_URL/zones/$zoneId/dns_records/$recordId") {
                 addHeaders()
             }.body<String>()
-            checkSuccess(deleteResponse, "delete TXT")
+            runCatching { checkSuccess(deleteResponse, "delete TXT") }
+                .onFailure { error ->
+                    deleteErrors += error.message ?: "record id=$recordId"
+                }
+        }
+        if (deleteErrors.isNotEmpty()) {
+            error("Cloudflare delete TXT partially failed: ${deleteErrors.joinToString("; ")}")
         }
     }
 
@@ -96,13 +108,11 @@ class CloudflareDnsProvider(
         }
         if (json.optBoolean("success")) return
         val errors = json.optJSONArray("errors").orEmpty()
-        val details = buildString {
-            for (index in 0 until errors.length()) {
-                val error = errors.optJSONObject(index) ?: continue
-                if (isNotEmpty()) append("; ")
-                append(error.optInt("code")).append(": ").append(error.optString("message"))
+        val details = (0 until errors.length())
+            .mapNotNull { index -> errors.optJSONObject(index) }
+            .joinToString(separator = "; ") { error ->
+                "${error.optInt("code")}: ${error.optString("message")}"
             }
-        }
         Logger.e("CloudflareDnsProvider", "Cloudflare $action failed: $details")
         error("Cloudflare $action failed: $details")
     }
@@ -117,5 +127,6 @@ class CloudflareDnsProvider(
 
     private companion object {
         const val BASE_URL = "https://api.cloudflare.com/client/v4"
+        const val ACME_CHALLENGE_TTL_SECONDS = 120
     }
 }

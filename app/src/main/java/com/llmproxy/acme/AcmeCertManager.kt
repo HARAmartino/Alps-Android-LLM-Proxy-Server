@@ -19,6 +19,7 @@ import java.io.FileReader
 import java.io.FileWriter
 import java.security.KeyPair
 import java.security.KeyPairGenerator
+import java.security.SecureRandom
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -143,7 +144,11 @@ class AcmeCertManager(
                 return KeyPairUtils.readKeyPair(reader)
             }
         }
-        val generated = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+        // ACME account/domain keys are explicitly kept at RSA-2048 to preserve broad TLS
+        // client compatibility on older Android devices.
+        val generated = KeyPairGenerator.getInstance("RSA")
+            .apply { initialize(2048, SecureRandom()) }
+            .generateKeyPair()
         FileWriter(file).use { writer ->
             KeyPairUtils.writeKeyPair(generated, writer)
         }

@@ -5,6 +5,9 @@ import com.llmproxy.client.UpstreamHttpClientFactory
 import com.llmproxy.data.SecurePreferences
 import com.llmproxy.data.SettingsRepository
 import com.llmproxy.server.SslContextLoader
+import com.llmproxy.service.DdnsUpdateTrigger
+import com.llmproxy.service.NetworkMonitor
+import com.llmproxy.service.NoOpDdnsUpdateTrigger
 import com.llmproxy.service.ServerLifecycleManager
 import com.llmproxy.util.SslCertGenerator
 import kotlinx.coroutines.CoroutineScope
@@ -35,6 +38,18 @@ class LlmProxyApplication : Application() {
 
     val upstreamHttpClientFactory: UpstreamHttpClientFactory by lazy {
         UpstreamHttpClientFactory()
+    }
+
+    val ddnsUpdateTrigger: DdnsUpdateTrigger by lazy {
+        NoOpDdnsUpdateTrigger
+    }
+
+    val networkMonitor: NetworkMonitor by lazy {
+        NetworkMonitor(
+            context = this,
+            scope = applicationScope,
+            ddnsUpdateTrigger = ddnsUpdateTrigger,
+        )
     }
 
     val serverLifecycleManager: ServerLifecycleManager by lazy {

@@ -26,11 +26,16 @@ class ProxyForegroundService : Service() {
     private val serverLifecycleManager by lazy {
         (application as LlmProxyApplication).serverLifecycleManager
     }
+    private val networkMonitor by lazy {
+        (application as LlmProxyApplication).networkMonitor
+    }
 
     private var notificationJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
+        // Register callback with service lifetime to avoid leaking network listeners.
+        networkMonitor.start()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Preparing local proxy server"))
         notificationJob = serviceScope.launch {
@@ -62,6 +67,8 @@ class ProxyForegroundService : Service() {
 
     override fun onDestroy() {
         notificationJob?.cancel()
+        // Unregister callback when service is destroyed to keep lifecycle ownership explicit.
+        networkMonitor.stop()
         serviceScope.cancel()
         super.onDestroy()
     }

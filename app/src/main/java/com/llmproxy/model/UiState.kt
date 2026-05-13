@@ -20,6 +20,8 @@ data class MainUiState(
     val serverStatus: ServerStatus = ServerStatus.Stopped,
     val activeConnections: Int = 0,
     val localEndpoint: String = "Not started",
+    val networkType: NetworkType = NetworkType.OFFLINE,
+    val publicIp: String? = null,
     val certificateReady: Boolean = false,
     val lastError: String? = null,
 )

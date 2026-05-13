@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.util.Patterns
 import com.llmproxy.model.NetworkState
 import com.llmproxy.model.NetworkType
 import kotlinx.coroutines.CoroutineDispatcher
@@ -18,6 +19,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.TimeUnit
 
 class NetworkMonitor(
     context: Context,
@@ -100,7 +102,7 @@ class NetworkMonitor(
                     previousState.ip.isNullOrBlank()
             val publicIp = if (shouldRefreshPublicIp) {
                 lastPublicIpCheckAtMs = now
-                fetchPublicIp()
+                fetchPublicIp(activeNetwork)
             } else {
                 previousState.ip
             }
@@ -117,16 +119,17 @@ class NetworkMonitor(
         _networkState.value = NetworkState(type = NetworkType.MOBILE, ip = null)
     }
 
-    private suspend fun fetchPublicIp(): String? = withContext(ioDispatcher) {
+    private suspend fun fetchPublicIp(activeNetwork: Network?): String? = withContext(ioDispatcher) {
         var connection: HttpURLConnection? = null
         runCatching {
-            connection = URL(PUBLIC_IP_ENDPOINT).openConnection() as HttpURLConnection
+            val url = URL(PUBLIC_IP_ENDPOINT)
+            connection = ((activeNetwork?.openConnection(url) ?: url.openConnection()) as HttpURLConnection)
             connection?.connectTimeout = PUBLIC_IP_CONNECT_TIMEOUT_MS
             connection?.readTimeout = PUBLIC_IP_READ_TIMEOUT_MS
             connection?.requestMethod = "GET"
             connection?.inputStream?.bufferedReader()?.use { reader ->
                 val response = reader.readText().trim()
-                response.takeIf { it.isNotBlank() }
+                response.takeIf { it.isNotBlank() && Patterns.IP_ADDRESS.matcher(it).matches() }
             }
         }.getOrNull().also {
             connection?.disconnect()
@@ -137,6 +140,6 @@ class NetworkMonitor(
         private const val PUBLIC_IP_ENDPOINT = "https://checkip.amazonaws.com"
         private const val PUBLIC_IP_CONNECT_TIMEOUT_MS = 3_000
         private const val PUBLIC_IP_READ_TIMEOUT_MS = 3_000
-        private const val PUBLIC_IP_REFRESH_INTERVAL_MS = 5 * 60_000L
+        private val PUBLIC_IP_REFRESH_INTERVAL_MS = TimeUnit.MINUTES.toMillis(5)
     }
 }

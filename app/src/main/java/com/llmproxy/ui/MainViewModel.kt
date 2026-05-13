@@ -31,9 +31,10 @@ class MainViewModel(
 
     val uiState: StateFlow<MainUiState> = combine(
         settingsRepository.serverConfig,
+        settingsRepository.tunnelingInfoDialogShown,
         serverLifecycleManager.runtimeState,
         networkMonitor.networkState,
-    ) { config, runtimeState, networkState ->
+    ) { config, tunnelingInfoDialogShown, runtimeState, networkState ->
         MainUiState(
             config = config,
             serverStatus = runtimeState.status,
@@ -45,6 +46,8 @@ class MainViewModel(
             lastError = runtimeState.lastError,
             tunnelStatus = runtimeState.tunnelStatus,
             tunnelPublicUrl = runtimeState.tunnelPublicUrl,
+            tunnelSessionExpiresAt = runtimeState.tunnelSessionExpiresAt,
+            hasSeenTunnelingInfoDialog = tunnelingInfoDialogShown,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -86,6 +89,12 @@ class MainViewModel(
     fun onTunnelAuthTokenChanged(value: String) {
         viewModelScope.launch {
             settingsRepository.updateTunnelAuthToken(value)
+        }
+    }
+
+    fun onTunnelingInfoDialogShown() {
+        viewModelScope.launch {
+            settingsRepository.markTunnelingInfoDialogShown()
         }
     }
 

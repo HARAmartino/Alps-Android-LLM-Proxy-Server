@@ -78,6 +78,7 @@ fun LlmProxyApp(
                     onBindAddressChanged = viewModel::onBindAddressChanged,
                     onNetworkModeChanged = viewModel::onNetworkModeChanged,
                     onTunnelAuthTokenChanged = viewModel::onTunnelAuthTokenChanged,
+                    onTunnelingInfoDialogShown = viewModel::onTunnelingInfoDialogShown,
                     onExportCertificate = viewModel::onExportCertificateRequested,
                 )
             }

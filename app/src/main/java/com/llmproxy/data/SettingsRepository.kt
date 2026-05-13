@@ -2,6 +2,7 @@ package com.llmproxy.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -29,6 +30,7 @@ class SettingsRepository(
     private val bindAddressKey = stringPreferencesKey("bind_address")
     private val networkModeKey = stringPreferencesKey("network_mode")
     private val tunnelPublicUrlKey = stringPreferencesKey("tunnel_public_url")
+    private val tunnelingInfoDialogShownKey = booleanPreferencesKey("tunneling_info_dialog_shown")
 
     val serverConfig: StateFlow<ServerConfig> = combine(
         context.dataStore.data
@@ -49,6 +51,21 @@ class SettingsRepository(
         started = SharingStarted.Eagerly,
         initialValue = ServerConfig(),
     )
+
+    val tunnelingInfoDialogShown: StateFlow<Boolean> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) {
+                emit(emptyPreferences())
+            } else {
+                throw exception
+            }
+        }
+        .map { preferences -> preferences[tunnelingInfoDialogShownKey] ?: false }
+        .stateIn(
+            scope = applicationScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
 
     suspend fun updateUpstreamUrl(value: String) {
         context.dataStore.edit { preferences ->
@@ -90,6 +107,12 @@ class SettingsRepository(
             } else {
                 preferences.remove(tunnelPublicUrlKey)
             }
+        }
+    }
+
+    suspend fun markTunnelingInfoDialogShown() {
+        context.dataStore.edit { preferences ->
+            preferences[tunnelingInfoDialogShownKey] = true
         }
     }
 

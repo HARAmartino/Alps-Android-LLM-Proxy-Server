@@ -43,6 +43,8 @@ class MainViewModel(
             publicIp = networkState.ip,
             certificateReady = app.sslCertGenerator.hasCertificateFiles(),
             lastError = runtimeState.lastError,
+            tunnelStatus = runtimeState.tunnelStatus,
+            tunnelPublicUrl = runtimeState.tunnelPublicUrl,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -72,6 +74,18 @@ class MainViewModel(
     fun onBindAddressChanged(value: String) {
         viewModelScope.launch {
             settingsRepository.updateBindAddress(value)
+        }
+    }
+
+    fun onNetworkModeChanged(value: String) {
+        viewModelScope.launch {
+            settingsRepository.updateNetworkMode(value)
+        }
+    }
+
+    fun onTunnelAuthTokenChanged(value: String) {
+        viewModelScope.launch {
+            settingsRepository.updateTunnelAuthToken(value)
         }
     }
 

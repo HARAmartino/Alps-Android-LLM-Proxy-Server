@@ -15,7 +15,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.llmproxy.model.MainUiState
+import com.llmproxy.model.ServerConfig
 import com.llmproxy.model.ServerStatus
+import com.llmproxy.model.TunnelStatus
 
 @Composable
 fun MainDashboard(
@@ -25,6 +27,8 @@ fun MainDashboard(
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isTunneling = state.config.networkMode == ServerConfig.NETWORK_MODE_TUNNELING
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -43,6 +47,15 @@ fun MainDashboard(
                 Text(text = "Network: ${state.networkType.name}")
                 Text(text = "Public IP: ${state.publicIp ?: "Unavailable"}")
                 Text(text = "Active connections: ${state.activeConnections}")
+
+                // Tunneling section: show public URL and status when in tunneling mode.
+                if (isTunneling) {
+                    TunnelStatusSection(
+                        tunnelStatus = state.tunnelStatus,
+                        tunnelPublicUrl = state.tunnelPublicUrl,
+                    )
+                }
+
                 state.lastError?.takeIf { it.isNotBlank() }?.let { error ->
                     Text(text = error, color = MaterialTheme.colorScheme.error)
                 }
@@ -65,5 +78,36 @@ fun MainDashboard(
                 Text(text = "Settings")
             }
         }
+    }
+}
+
+@Composable
+private fun TunnelStatusSection(
+    tunnelStatus: TunnelStatus,
+    tunnelPublicUrl: String?,
+) {
+    val statusLabel = when (tunnelStatus) {
+        TunnelStatus.Idle -> "Idle"
+        TunnelStatus.Connecting -> "Connecting…"
+        TunnelStatus.Active -> "Active"
+        TunnelStatus.Error -> "Error"
+    }
+    val statusColor = when (tunnelStatus) {
+        TunnelStatus.Active -> MaterialTheme.colorScheme.primary
+        TunnelStatus.Error -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Text(
+        text = "Tunnel: $statusLabel",
+        color = statusColor,
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    tunnelPublicUrl?.takeIf { it.isNotBlank() }?.let { url ->
+        Text(
+            text = "Public URL: $url",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
     }
 }

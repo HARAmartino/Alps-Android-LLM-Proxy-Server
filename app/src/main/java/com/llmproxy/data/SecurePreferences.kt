@@ -24,16 +24,27 @@ class SecurePreferences(context: Context) {
     }
 
     private val apiKeyState = MutableStateFlow(sharedPreferences.getString(KEY_API_KEY, "").orEmpty())
+    private val tunnelAuthTokenState = MutableStateFlow(
+        sharedPreferences.getString(KEY_TUNNEL_AUTH_TOKEN, "").orEmpty()
+    )
 
     fun apiKeyFlow(): StateFlow<String> = apiKeyState.asStateFlow()
+
+    fun tunnelAuthTokenFlow(): StateFlow<String> = tunnelAuthTokenState.asStateFlow()
 
     suspend fun setApiKey(apiKey: String) {
         sharedPreferences.edit().putString(KEY_API_KEY, apiKey).apply()
         apiKeyState.value = apiKey
     }
 
+    suspend fun setTunnelAuthToken(token: String) {
+        sharedPreferences.edit().putString(KEY_TUNNEL_AUTH_TOKEN, token).apply()
+        tunnelAuthTokenState.value = token
+    }
+
     companion object {
         private const val FILE_NAME = "secure_settings"
         private const val KEY_API_KEY = "api_key"
+        private const val KEY_TUNNEL_AUTH_TOKEN = "tunnel_auth_token"
     }
 }

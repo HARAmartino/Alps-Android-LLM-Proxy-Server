@@ -13,6 +13,8 @@ data class ServerRuntimeState(
     val activeConnections: Int = 0,
     val localEndpoint: String = "Not started",
     val lastError: String? = null,
+    val tunnelStatus: TunnelStatus = TunnelStatus.Idle,
+    val tunnelPublicUrl: String? = null,
 )
 
 data class MainUiState(
@@ -24,6 +26,8 @@ data class MainUiState(
     val publicIp: String? = null,
     val certificateReady: Boolean = false,
     val lastError: String? = null,
+    val tunnelStatus: TunnelStatus = TunnelStatus.Idle,
+    val tunnelPublicUrl: String? = null,
 )
 
 sealed interface MainUiEffect {

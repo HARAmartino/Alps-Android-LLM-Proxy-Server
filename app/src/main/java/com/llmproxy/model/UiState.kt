@@ -1,5 +1,7 @@
 package com.llmproxy.model
 
+import java.time.Instant
+
 enum class ServerStatus {
     Stopped,
     Starting,
@@ -15,6 +17,7 @@ data class ServerRuntimeState(
     val lastError: String? = null,
     val tunnelStatus: TunnelStatus = TunnelStatus.Idle,
     val tunnelPublicUrl: String? = null,
+    val tunnelSessionExpiresAt: Instant? = null,
 )
 
 data class MainUiState(
@@ -28,6 +31,8 @@ data class MainUiState(
     val lastError: String? = null,
     val tunnelStatus: TunnelStatus = TunnelStatus.Idle,
     val tunnelPublicUrl: String? = null,
+    val tunnelSessionExpiresAt: Instant? = null,
+    val hasSeenTunnelingInfoDialog: Boolean = false,
 )
 
 sealed interface MainUiEffect {

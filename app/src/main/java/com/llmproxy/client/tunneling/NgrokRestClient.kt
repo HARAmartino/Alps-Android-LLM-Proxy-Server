@@ -14,6 +14,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import kotlinx.coroutines.delay
 import org.json.JSONObject
+import java.time.Instant
 
 /**
  * Ngrok REST API client for creating and closing HTTP tunnels.
@@ -133,9 +134,13 @@ class NgrokRestClient(
             // Store tunnelName|authToken so close() can call the right endpoint.
             // The name comes back in the response JSON as "name".
             val name = json.optString("name").ifBlank { "alps-proxy" }
+            val expiresAt = json.optString("expires_at")
+                .takeIf { it.isNotBlank() }
+                ?.let { value -> runCatching { Instant.parse(value) }.getOrNull() }
             TunnelSession(
                 publicUrl = publicUrl,
                 sessionToken = name,
+                expiresAt = expiresAt,
             )
         }.getOrElse { cause ->
             throw TunnelingException("Failed to parse ngrok API response: ${cause.message}", cause)

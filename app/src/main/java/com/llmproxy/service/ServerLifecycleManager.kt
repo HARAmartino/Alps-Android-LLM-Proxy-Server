@@ -82,6 +82,7 @@ class ServerLifecycleManager(
                 lastError = null,
                 tunnelStatus = if (isTunneling) TunnelStatus.Connecting else TunnelStatus.Idle,
                 tunnelPublicUrl = null,
+                tunnelSessionExpiresAt = null,
             )
 
             try {
@@ -102,6 +103,7 @@ class ServerLifecycleManager(
                     status = ServerStatus.Error,
                     lastError = error.message,
                     tunnelStatus = TunnelStatus.Idle,
+                    tunnelSessionExpiresAt = null,
                 )
             }
         }
@@ -117,6 +119,7 @@ class ServerLifecycleManager(
                     status = ServerStatus.Stopped,
                     tunnelStatus = TunnelStatus.Idle,
                     tunnelPublicUrl = null,
+                    tunnelSessionExpiresAt = null,
                 )
                 return
             }
@@ -138,6 +141,7 @@ class ServerLifecycleManager(
                 lastError = null,
                 tunnelStatus = TunnelStatus.Idle,
                 tunnelPublicUrl = null,
+                tunnelSessionExpiresAt = null,
             )
         }
     }
@@ -149,6 +153,7 @@ class ServerLifecycleManager(
             _runtimeState.value = _runtimeState.value.copy(
                 tunnelStatus = TunnelStatus.Error,
                 lastError = "Tunneling client not configured.",
+                tunnelSessionExpiresAt = null,
             )
             return
         }
@@ -157,6 +162,7 @@ class ServerLifecycleManager(
             _runtimeState.value = _runtimeState.value.copy(
                 tunnelStatus = TunnelStatus.Error,
                 lastError = "Invalid ngrok auth token. Check Settings → Tunnel Auth Token.",
+                tunnelSessionExpiresAt = null,
             )
             return
         }
@@ -169,6 +175,7 @@ class ServerLifecycleManager(
             _runtimeState.value = _runtimeState.value.copy(
                 tunnelStatus = TunnelStatus.Active,
                 tunnelPublicUrl = session.publicUrl,
+                tunnelSessionExpiresAt = session.expiresAt,
             )
             Logger.d("ServerLifecycleManager", "Tunnel active: ${session.publicUrl}")
         } catch (e: TunnelingException) {
@@ -176,6 +183,7 @@ class ServerLifecycleManager(
             _runtimeState.value = _runtimeState.value.copy(
                 tunnelStatus = TunnelStatus.Error,
                 lastError = e.message,
+                tunnelSessionExpiresAt = null,
             )
         }
     }

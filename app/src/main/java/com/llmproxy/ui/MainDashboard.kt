@@ -53,6 +53,7 @@ fun MainDashboard(
     state: MainUiState,
     onStartClick: () -> Unit,
     onStopClick: () -> Unit,
+    onManualReconnectClick: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -84,6 +85,8 @@ fun MainDashboard(
                     Text(text = "Network: ${state.networkType.name}")
                     Text(text = "Public IP: ${state.publicIp ?: "Unavailable"}")
                     Text(text = "Active connections: ${state.activeConnections}")
+                    Text(text = "Latency p95: ${state.latencyP95Ms?.let { "${it}ms" } ?: "N/A"}")
+                    Text(text = "Latency p99: ${state.latencyP99Ms?.let { "${it}ms" } ?: "N/A"}")
 
                     // Tunneling section: show public URL and status when in tunneling mode.
                     if (isTunneling) {
@@ -92,6 +95,8 @@ fun MainDashboard(
                             tunnelPublicUrl = state.tunnelPublicUrl,
                             tunnelSessionExpiresAt = state.tunnelSessionExpiresAt,
                             tunnelLastError = state.lastError,
+                            showManualReconnect = state.showManualTunnelReconnect,
+                            onManualReconnectClick = onManualReconnectClick,
                             onCopyUrl = { url ->
                                 clipboardManager.setText(AnnotatedString(url))
                                 scope.launch {
@@ -135,6 +140,8 @@ private fun TunnelStatusSection(
     tunnelPublicUrl: String?,
     tunnelSessionExpiresAt: Instant?,
     tunnelLastError: String?,
+    showManualReconnect: Boolean,
+    onManualReconnectClick: () -> Unit,
     onCopyUrl: (String) -> Unit,
 ) {
     var isErrorExpanded by rememberSaveable { mutableStateOf(false) }
@@ -225,6 +232,11 @@ private fun TunnelStatusSection(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
+        }
+        if (showManualReconnect) {
+            OutlinedButton(onClick = onManualReconnectClick) {
+                Text("Reconnect manually")
+            }
         }
     }
 }

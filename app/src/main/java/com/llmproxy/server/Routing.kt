@@ -37,6 +37,7 @@ internal fun Application.installProxyRoutes(
     config: ServerConfig,
     activeConnections: MutableStateFlow<Int>,
     upstreamClient: HttpClient,
+    onRequestLatencyMeasured: (Long) -> Unit = {},
 ) {
     routing {
         route("/{path...}") {
@@ -47,6 +48,7 @@ internal fun Application.installProxyRoutes(
                     pathSegments = pathSegments,
                     queryString = call.request.queryString(),
                 )
+                val requestStartNs = System.nanoTime()
 
                 val upstreamBodyChannelRef = AtomicReference<ByteReadChannel?>(null)
                 activeConnections.update { it + 1 }
@@ -110,6 +112,8 @@ internal fun Application.installProxyRoutes(
                     Logger.e("Routing", "Proxy request failed", error)
                     call.respondIfPossible(HttpStatusCode.BadGateway, "Upstream service unavailable")
                 } finally {
+                    val elapsedMs = ((System.nanoTime() - requestStartNs) / 1_000_000L).coerceAtLeast(0L)
+                    onRequestLatencyMeasured(elapsedMs)
                     activeConnections.update { current -> (current - 1).coerceAtLeast(0) }
                 }
             }

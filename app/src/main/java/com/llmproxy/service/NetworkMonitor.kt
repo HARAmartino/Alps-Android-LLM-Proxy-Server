@@ -25,6 +25,7 @@ class NetworkMonitor(
     context: Context,
     private val scope: CoroutineScope,
     private val ddnsUpdateTrigger: DdnsUpdateTrigger,
+    private val isPortForwardingMode: () -> Boolean = { true },
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val connectivityManager =
@@ -108,7 +109,11 @@ class NetworkMonitor(
             }
             lastObservedNetworkHandle = currentHandle
             _networkState.value = NetworkState(type = NetworkType.WIFI, ip = publicIp)
-            if (!publicIp.isNullOrBlank() && publicIp != previousState.ip) {
+            if (
+                isPortForwardingMode() &&
+                !publicIp.isNullOrBlank() &&
+                publicIp != previousState.ip
+            ) {
                 // DDNS should only be triggered when the observed public IP actually changes.
                 ddnsUpdateTrigger.onIpChanged(publicIp)
             }

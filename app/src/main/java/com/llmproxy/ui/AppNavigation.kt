@@ -66,6 +66,7 @@ fun LlmProxyApp(
                     state = state,
                     onStartClick = viewModel::onStartRequested,
                     onStopClick = viewModel::onStopRequested,
+                    onManualReconnectClick = viewModel::onManualTunnelReconnectRequested,
                     onSettingsClick = { navController.navigate(SETTINGS_ROUTE) },
                 )
             }

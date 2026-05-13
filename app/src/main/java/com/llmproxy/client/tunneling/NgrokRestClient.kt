@@ -4,6 +4,7 @@ import com.llmproxy.util.Logger
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.delete
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -15,6 +16,7 @@ import io.ktor.http.contentType
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.time.Instant
+import java.util.UUID
 
 /**
  * Ngrok REST API client for creating and closing HTTP tunnels.
@@ -29,15 +31,19 @@ import java.time.Instant
  */
 class NgrokRestClient(
     private val requestTimeoutMs: Long = 30_000L,
+    private val testHttpClient: HttpClient? = null,
+    private val delayMillis: suspend (Long) -> Unit = { delay(it) },
+    private val tunnelNameGenerator: () -> String = { "alps-proxy-${UUID.randomUUID()}" },
 ) : TunnelingClient {
 
     // Dedicated Ktor CIO client scoped to ngrok API calls only.
-    private val httpClient: HttpClient = HttpClient(CIO) {
+    private val httpClient: HttpClient = testHttpClient ?: HttpClient(CIO) {
         expectSuccess = false
+        install(ContentNegotiation)
         install(HttpTimeout) {
-            requestTimeoutMillis = requestTimeoutMs
+            requestTimeoutMillis = this@NgrokRestClient.requestTimeoutMs
             connectTimeoutMillis = 15_000L
-            socketTimeoutMillis = requestTimeoutMs
+            socketTimeoutMillis = this@NgrokRestClient.requestTimeoutMs
         }
     }
 
@@ -51,7 +57,7 @@ class NgrokRestClient(
      * @return [TunnelSession] containing the assigned public URL and tunnel name.
      */
     override suspend fun createTunnel(localPort: Int, authToken: String): TunnelSession {
-        val tunnelName = "alps-proxy-${System.currentTimeMillis()}"
+        val tunnelName = tunnelNameGenerator()
         val requestBody = JSONObject().apply {
             put("addr", "localhost:$localPort")
             put("proto", "http")
@@ -90,7 +96,7 @@ class NgrokRestClient(
                     }
                     val backoffMs = BACKOFF_BASE_MS shl attempt
                     Logger.d(TAG, "ngrok rate limit (429), retrying in ${backoffMs}ms (attempt ${attempt + 1}/$MAX_RETRIES)")
-                    delay(backoffMs)
+                    delayMillis(backoffMs)
                     attempt++
                 }
                 else -> {

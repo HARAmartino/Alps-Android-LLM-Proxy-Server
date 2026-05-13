@@ -18,6 +18,9 @@ data class ServerRuntimeState(
     val tunnelStatus: TunnelStatus = TunnelStatus.Idle,
     val tunnelPublicUrl: String? = null,
     val tunnelSessionExpiresAt: Instant? = null,
+    val latencyP95Ms: Long? = null,
+    val latencyP99Ms: Long? = null,
+    val showManualTunnelReconnect: Boolean = false,
 )
 
 data class MainUiState(
@@ -32,6 +35,9 @@ data class MainUiState(
     val tunnelStatus: TunnelStatus = TunnelStatus.Idle,
     val tunnelPublicUrl: String? = null,
     val tunnelSessionExpiresAt: Instant? = null,
+    val latencyP95Ms: Long? = null,
+    val latencyP99Ms: Long? = null,
+    val showManualTunnelReconnect: Boolean = false,
     val hasSeenTunnelingInfoDialog: Boolean = false,
 )
 

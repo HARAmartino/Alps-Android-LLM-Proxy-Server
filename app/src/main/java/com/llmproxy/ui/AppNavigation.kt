@@ -117,10 +117,13 @@ fun LlmProxyApp(
                     onLetsEncryptAutoRenewChanged = viewModel::onLetsEncryptAutoRenewChanged,
                     onRequestCertificate = viewModel::onRequestCertificateRequested,
                     onTunnelingInfoDialogShown = viewModel::onTunnelingInfoDialogShown,
+                    onBatteryOptimizationGuideHandled = viewModel::onBatteryOptimizationGuideHandled,
                     onExportCertificate = viewModel::onExportCertificateRequested,
                     onExportAccessLogs = viewModel::onExportAccessLogsRequested,
                     onExportSystemLogs = viewModel::onExportSystemLogsRequested,
                     onWebhookForwardUrlChanged = viewModel::onWebhookForwardUrlChanged,
+                    onEnableWakeLockChanged = viewModel::onEnableWakeLockChanged,
+                    onEnableWifiLockChanged = viewModel::onEnableWifiLockChanged,
                 )
             }
         }

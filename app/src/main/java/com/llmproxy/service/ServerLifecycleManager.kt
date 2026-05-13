@@ -1,12 +1,17 @@
 package com.llmproxy.service
 
 import android.content.Context
+import android.net.wifi.WifiManager
+import android.os.PowerManager
+import android.os.SystemClock
+import androidx.work.WorkManager
 import com.llmproxy.acme.AcmeCertManager
 import com.llmproxy.client.tunneling.TunnelSession
 import com.llmproxy.client.tunneling.TunnelingClient
 import com.llmproxy.client.tunneling.TunnelingException
 import com.llmproxy.data.SettingsRepository
 import com.llmproxy.logging.AccessLogger
+import com.llmproxy.logging.SystemLogger
 import com.llmproxy.model.NetworkType
 import com.llmproxy.model.ServerConfig
 import com.llmproxy.model.ServerRuntimeState
@@ -35,11 +40,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.ceil
-import androidx.work.WorkManager
 
 class ServerLifecycleManager(
     private val context: Context,
@@ -52,6 +57,7 @@ class ServerLifecycleManager(
     private val tunnelingClient: TunnelingClient? = null,
     private val networkMonitor: NetworkMonitor? = null,
     private val accessLogger: AccessLogger? = null,
+    private val systemLogger: SystemLogger? = null,
 ) {
     private val lifecycleMutex = Mutex()
     private val activeConnections = MutableStateFlow(0)
@@ -76,8 +82,20 @@ class ServerLifecycleManager(
     private var activeTunnelSession: TunnelSession? = null
     private var lastKnownNetworkType: NetworkType = NetworkType.OFFLINE
     private var tunnelReconnectJob: Job? = null
+    private var wakeLockRefreshJob: Job? = null
+    private var wifiLockRefreshJob: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+    private var lockSessionStartedAtElapsedMs: Long? = null
+    private var lockActiveAccumulatedMs: Long = 0L
     private val latencySamples = ArrayDeque<LatencySample>()
     private val latencyLock = Any()
+    private val powerManager: PowerManager? by lazy {
+        context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+    }
+    private val wifiManager: WifiManager? by lazy {
+        context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+    }
     private val proxyServerFactory: ProxyServerFactory by lazy {
         ProxyServerFactory(
             upstreamClient = upstreamClient,
@@ -105,6 +123,16 @@ class ServerLifecycleManager(
                         onNetworkTypeChanged(type)
                     }
             }
+        }
+        applicationScope.launch {
+            settingsRepository.serverConfig
+                .map { it.enableWakeLock to it.enableWifiLock }
+                .distinctUntilChanged()
+                .collect {
+                    lifecycleMutex.withLock {
+                        reconcilePowerLocksLocked(settingsRepository.serverConfig.value)
+                    }
+                }
         }
     }
 
@@ -155,8 +183,10 @@ class ServerLifecycleManager(
                 }
                 sslCertGenerator.ensureCertificateFiles()
                 startEngineLocked(config = config, effectiveConfig = effectiveConfig, isTunneling = isTunneling)
+                reconcilePowerLocksLocked(config)
             } catch (error: Exception) {
                 Logger.e("ServerLifecycleManager", "Failed to start server", error)
+                releaseAllPowerLocksLocked()
                 serverEngine = null
                 _runtimeState.value = _runtimeState.value.copy(
                     status = ServerStatus.Error,
@@ -196,6 +226,7 @@ class ServerLifecycleManager(
                 Logger.e("ServerLifecycleManager", "Failed to stop server cleanly", error)
             }
             serverEngine = null
+            releaseAllPowerLocksLocked()
             activeConnections.value = 0
             // Cancel any queued renewal work to prevent a duplicate renewal attempt after shutdown.
             WorkManager.getInstance(context).cancelUniqueWork(CertificateRenewalWorker.UNIQUE_WORK_NAME)
@@ -364,6 +395,9 @@ class ServerLifecycleManager(
 
             val config = settingsRepository.serverConfig.value
             val isTunneling = config.networkMode == ServerConfig.NETWORK_MODE_TUNNELING
+            if (serverEngine != null) {
+                reconcilePowerLocksLocked(config)
+            }
             if (!isTunneling || serverEngine == null) {
                 return
             }
@@ -490,6 +524,204 @@ class ServerLifecycleManager(
         private const val TUNNEL_RECONNECT_BACKOFF_BASE_MS = 2_000L
         private const val TUNNEL_RECONNECT_BACKOFF_MAX_MS = 15_000L
         private const val DRAIN_CONNECTION_TIMEOUT_MS = 30_000L
+        // 15 minutes keeps lock holds bounded (WakeLock uses acquire(timeout); WifiLock is rotated
+        // by scheduler) while avoiding overly frequent acquire/release churn.
+        private const val POWER_LOCK_TIMEOUT_MS = 15 * 60 * 1000L
+        private const val POWER_LOCK_REFRESH_MARGIN_MS = 30_000L
+        private const val POWER_LOCK_REFRESH_MIN_DELAY_MS = 1_000L
+        private const val POWER_LOCK_REFRESH_DELAY_MS = POWER_LOCK_TIMEOUT_MS - POWER_LOCK_REFRESH_MARGIN_MS
+        private const val WAKE_LOCK_TAG = "llmproxy:server_wakelock"
+        private const val WIFI_LOCK_TAG = "llmproxy:server_wifilock"
+    }
+
+    private fun reconcilePowerLocksLocked(config: ServerConfig) {
+        val shouldHoldWakeLock = serverEngine != null && config.enableWakeLock
+        val shouldHoldWifiLock = serverEngine != null &&
+            config.enableWifiLock &&
+            lastKnownNetworkType == NetworkType.WIFI
+
+        if (shouldHoldWakeLock) {
+            acquireWakeLockLocked()
+        } else {
+            releaseWakeLockLocked()
+        }
+
+        if (shouldHoldWifiLock) {
+            acquireWifiLockLocked()
+        } else {
+            releaseWifiLockLocked()
+        }
+
+        updateLockRuntimeStateLocked()
+    }
+
+    // Lock acquisition is wrapped with try/finally so partially acquired resources are
+    // never leaked if an exception is thrown during setup.
+    private fun acquireWakeLockLocked() {
+        if (wakeLock?.isHeld == true) return
+        val manager = powerManager ?: return
+        val candidate = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
+        var acquired = false
+        try {
+            candidate.setReferenceCounted(false)
+            candidate.acquire(POWER_LOCK_TIMEOUT_MS)
+            wakeLock = candidate
+            acquired = true
+            logPowerLockEvent("WakeLock acquired")
+            scheduleWakeLockRefreshLocked()
+        } catch (error: Exception) {
+            Logger.e("ServerLifecycleManager", "Failed to acquire WakeLock", error)
+        } finally {
+            if (!acquired) {
+                runCatching {
+                    if (candidate.isHeld) {
+                        candidate.release()
+                    }
+                }
+            }
+        }
+    }
+
+    // OEMs expose this API unevenly, so acquisition is best-effort and guarded defensively.
+    private fun acquireWifiLockLocked() {
+        if (wifiLock?.isHeld == true) return
+        val manager = wifiManager ?: return
+        val candidate = manager.createWifiLock(
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+            WIFI_LOCK_TAG,
+        )
+        var acquired = false
+        try {
+            candidate.setReferenceCounted(false)
+            candidate.acquire()
+            wifiLock = candidate
+            acquired = true
+            logPowerLockEvent("WifiLock acquired")
+            scheduleWifiLockRefreshLocked()
+        } catch (error: Exception) {
+            Logger.e("ServerLifecycleManager", "Failed to acquire WifiLock", error)
+        } finally {
+            if (!acquired) {
+                runCatching {
+                    if (candidate.isHeld) {
+                        candidate.release()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun releaseWakeLockLocked() {
+        wakeLockRefreshJob?.cancel()
+        wakeLockRefreshJob = null
+        val held = wakeLock ?: return
+        runCatching {
+            if (held.isHeld) {
+                held.release()
+                logPowerLockEvent("WakeLock released")
+            }
+        }.onFailure { Logger.e("ServerLifecycleManager", "Failed to release WakeLock", it) }
+        wakeLock = null
+    }
+
+    private fun releaseWifiLockLocked() {
+        wifiLockRefreshJob?.cancel()
+        wifiLockRefreshJob = null
+        val held = wifiLock ?: return
+        runCatching {
+            if (held.isHeld) {
+                held.release()
+                logPowerLockEvent("WifiLock released")
+            }
+        }.onFailure { Logger.e("ServerLifecycleManager", "Failed to release WifiLock", it) }
+        wifiLock = null
+    }
+
+    private fun releaseAllPowerLocksLocked() {
+        releaseWakeLockLocked()
+        releaseWifiLockLocked()
+        updateLockRuntimeStateLocked()
+    }
+
+    private fun updateLockRuntimeStateLocked() {
+        val now = SystemClock.elapsedRealtime()
+        val wakeLockActive = wakeLock?.isHeld == true
+        val wifiLockActive = wifiLock?.isHeld == true
+        val anyLockActive = wakeLockActive || wifiLockActive
+        val activeSessionStart = lockSessionStartedAtElapsedMs
+
+        if (anyLockActive && activeSessionStart == null) {
+            lockSessionStartedAtElapsedMs = now
+        } else if (!anyLockActive && activeSessionStart != null) {
+            lockActiveAccumulatedMs += now - activeSessionStart
+            lockSessionStartedAtElapsedMs = null
+        }
+
+        val activeSince = lockSessionStartedAtElapsedMs
+        val activeSessionDurationMs = if (anyLockActive && activeSince != null) {
+            now - activeSince
+        } else {
+            0L
+        }
+        val totalMs = lockActiveAccumulatedMs + activeSessionDurationMs
+
+        _runtimeState.update {
+            it.copy(
+                isWakeLockActive = wakeLockActive,
+                isWifiLockActive = wifiLockActive,
+                totalLockActiveMs = totalMs,
+            )
+        }
+    }
+
+    private fun logPowerLockEvent(message: String) {
+        val logger = systemLogger ?: return
+        applicationScope.launch {
+            runCatching { logger.info("PowerLocks", message) }
+        }
+    }
+
+    private fun nextPowerLockRefreshDelayMs(): Long =
+        POWER_LOCK_REFRESH_DELAY_MS.coerceAtLeast(POWER_LOCK_REFRESH_MIN_DELAY_MS)
+
+    private fun scheduleWakeLockRefreshLocked() {
+        wakeLockRefreshJob?.cancel()
+        wakeLockRefreshJob = applicationScope.launch {
+            delay(nextPowerLockRefreshDelayMs())
+            if (!isActive) return@launch
+            lifecycleMutex.withLock {
+                val config = settingsRepository.serverConfig.value
+                if (wakeLock?.isHeld == true && serverEngine != null && config.enableWakeLock) {
+                    // WakeLock timeout cannot be extended in-place; rotate before timeout.
+                    releaseWakeLockLocked()
+                    acquireWakeLockLocked()
+                    updateLockRuntimeStateLocked()
+                }
+            }
+        }
+    }
+
+    private fun scheduleWifiLockRefreshLocked() {
+        wifiLockRefreshJob?.cancel()
+        wifiLockRefreshJob = applicationScope.launch {
+            delay(nextPowerLockRefreshDelayMs())
+            if (!isActive) return@launch
+            lifecycleMutex.withLock {
+                val config = settingsRepository.serverConfig.value
+                if (
+                    wifiLock?.isHeld == true &&
+                    serverEngine != null &&
+                    config.enableWifiLock &&
+                    lastKnownNetworkType == NetworkType.WIFI
+                ) {
+                    // WifiLock has no timeout API, so we enforce bounded hold duration by
+                    // scheduler-driven release + reacquire while conditions still match.
+                    releaseWifiLockLocked()
+                    acquireWifiLockLocked()
+                    updateLockRuntimeStateLocked()
+                }
+            }
+        }
     }
 
     private suspend fun runAcmeFlowLocked(domain: String): AcmeCertManager.AcmeResult {

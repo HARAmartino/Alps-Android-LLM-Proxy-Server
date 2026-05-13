@@ -1,5 +1,6 @@
 package com.llmproxy.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
@@ -20,17 +22,22 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.llmproxy.model.MainUiState
 import com.llmproxy.model.ServerConfig
+import com.llmproxy.util.Logger
+import com.llmproxy.util.formatElapsedDuration
+import com.llmproxy.util.OemOptimizationGuide
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -51,13 +58,27 @@ fun SettingsScreen(
     onLetsEncryptAutoRenewChanged: (Boolean) -> Unit,
     onRequestCertificate: () -> Unit,
     onTunnelingInfoDialogShown: () -> Unit,
+    onBatteryOptimizationGuideHandled: (Boolean) -> Unit,
     onExportCertificate: () -> Unit,
     onExportAccessLogs: () -> Unit,
     onExportSystemLogs: () -> Unit,
     onWebhookForwardUrlChanged: (String) -> Unit,
+    onEnableWakeLockChanged: (Boolean) -> Unit,
+    onEnableWifiLockChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isTunneling = state.config.networkMode == ServerConfig.NETWORK_MODE_TUNNELING
+    val context = LocalContext.current
+    var showBatteryGuideDialog by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(
+        state.hasSeenBatteryOptimizationGuideDialog,
+        state.batteryOptimizationGuideDontShowAgain,
+    ) {
+        if (!state.hasSeenBatteryOptimizationGuideDialog && !state.batteryOptimizationGuideDontShowAgain) {
+            showBatteryGuideDialog = true
+        }
+    }
 
     Column(
         modifier = modifier
@@ -67,6 +88,74 @@ fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text(text = "Settings", style = MaterialTheme.typography.headlineSmall)
+
+        if (showBatteryGuideDialog) {
+            BatteryOptimizationGuideDialog(
+                onDismiss = { dontShowAgain ->
+                    showBatteryGuideDialog = false
+                    onBatteryOptimizationGuideHandled(dontShowAgain)
+                },
+                onOpenSettings = { dontShowAgain ->
+                    showBatteryGuideDialog = false
+                    onBatteryOptimizationGuideHandled(dontShowAgain)
+                    val intent = OemOptimizationGuide.resolveSettingsIntent(context)
+                    runCatching { context.startActivity(intent) }
+                        .onFailure {
+                            Logger.e("SettingsScreen", "Failed to open battery optimization settings", it)
+                            Toast.makeText(context, "Unable to open battery settings", Toast.LENGTH_SHORT).show()
+                        }
+                },
+            )
+        }
+
+        Text(text = "Power Lock Controls", style = MaterialTheme.typography.titleMedium)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Keep CPU awake while running")
+                Text(
+                    text = "Increases battery drain",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            Switch(
+                checked = state.config.enableWakeLock,
+                onCheckedChange = onEnableWakeLockChanged,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Prevent Wi-Fi sleep while running")
+                Text(
+                    text = "Use only when charging",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            Switch(
+                checked = state.config.enableWifiLock,
+                onCheckedChange = onEnableWifiLockChanged,
+            )
+        }
+        OutlinedButton(
+            onClick = {
+                showBatteryGuideDialog = true
+            },
+        ) {
+            Text("Battery Optimization Guide")
+        }
+        Text(
+            text = "Total lock-active time: ${formatElapsedDuration(state.totalLockActiveMs)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
         OutlinedTextField(
             value = state.config.upstreamUrl,
             onValueChange = onUpstreamUrlChanged,
@@ -208,6 +297,51 @@ fun SettingsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+@Composable
+private fun BatteryOptimizationGuideDialog(
+    onDismiss: (dontShowAgain: Boolean) -> Unit,
+    onOpenSettings: (dontShowAgain: Boolean) -> Unit,
+) {
+    var dontShowAgain by rememberSaveable { mutableStateOf(false) }
+    val manufacturer = OemOptimizationGuide.manufacturerDisplayName()
+    val instructions = OemOptimizationGuide.instructions()
+
+    AlertDialog(
+        onDismissRequest = { onDismiss(dontShowAgain) },
+        title = { Text("Battery Optimization Guide ($manufacturer)") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                instructions.forEachIndexed { index, step ->
+                    Text("${index + 1}. $step", style = MaterialTheme.typography.bodySmall)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Checkbox(
+                        checked = dontShowAgain,
+                        onCheckedChange = { dontShowAgain = it },
+                    )
+                    Text(
+                        text = "Don't show again",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onOpenSettings(dontShowAgain) }) {
+                Text("Open Settings")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onDismiss(dontShowAgain) }) {
+                Text("Close")
+            }
+        },
+    )
 }
 
 @Composable

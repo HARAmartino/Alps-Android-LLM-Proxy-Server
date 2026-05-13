@@ -44,6 +44,7 @@ import com.llmproxy.model.RecentError
 import com.llmproxy.model.ServerConfig
 import com.llmproxy.model.ServerStatus
 import com.llmproxy.model.TunnelStatus
+import com.llmproxy.util.formatElapsedDuration
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -93,6 +94,29 @@ fun MainDashboard(
                     Text(text = "Active connections: ${state.activeConnections}")
                     Text(text = "Latency p95: ${state.latencyP95Ms?.let { "${it}ms" } ?: "N/A"}")
                     Text(text = "Latency p99: ${state.latencyP99Ms?.let { "${it}ms" } ?: "N/A"}")
+                    if (state.isWakeLockActive || state.isWifiLockActive) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (state.isWakeLockActive) {
+                                Text(
+                                    text = "\uD83D\uDD12 CPU awake",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            if (state.isWifiLockActive) {
+                                Text(
+                                    text = "\uD83D\uDD12 Wi-Fi awake",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        text = "Power lock time: ${formatElapsedDuration(state.totalLockActiveMs)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
 
                     // Restart metrics — show after at least one graceful restart has occurred.
                     if (state.gracefulCloseCount > 0 || state.forcedCloseCount > 0) {

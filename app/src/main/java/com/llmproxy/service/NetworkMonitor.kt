@@ -120,13 +120,15 @@ class NetworkMonitor(
     }
 
     private suspend fun fetchPublicIp(activeNetwork: Network?): String? = withContext(ioDispatcher) {
+        val network = activeNetwork ?: return@withContext null
         var connection: HttpURLConnection? = null
         runCatching {
             val url = URL(PUBLIC_IP_ENDPOINT)
-            connection = ((activeNetwork?.openConnection(url) ?: url.openConnection()) as HttpURLConnection)
+            connection = network.openConnection(url) as HttpURLConnection
             connection?.connectTimeout = PUBLIC_IP_CONNECT_TIMEOUT_MS
             connection?.readTimeout = PUBLIC_IP_READ_TIMEOUT_MS
             connection?.requestMethod = "GET"
+            connection?.connect()
             connection?.inputStream?.bufferedReader()?.use { reader ->
                 val response = reader.readText().trim()
                 response.takeIf { it.isNotBlank() && Patterns.IP_ADDRESS.matcher(it).matches() }

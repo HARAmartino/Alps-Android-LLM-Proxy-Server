@@ -2,6 +2,8 @@
 
 Repository: `HARAmartino/Alps-Android-LLM-Proxy-Server`
 
+古いAndroidスマートフォン（Android 8.0+）を、ローカルネットワーク上で利用できる HTTPS 対応・ストリーミング転送可能な汎用 LLM API プロキシサーバーとして活用するためのアプリケーションです。
+
 Android 8.0+ application skeleton that turns an older phone into a local-network HTTPS proxy for upstream LLM APIs.
 
 ## MVP scope

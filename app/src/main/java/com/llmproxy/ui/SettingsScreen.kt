@@ -150,7 +150,7 @@ private fun NetworkModeSelector(
             },
         )
         Text(
-            text = "Tunneling: Accessible from anywhere via ngrok. Requires auth token. Free tier limits apply.",
+            text = "Tunneling: Accessible from anywhere via Ngrok. Requires auth token. Free tier limits apply.",
             style = MaterialTheme.typography.bodySmall,
             color = if (selectedMode == ServerConfig.NETWORK_MODE_TUNNELING) {
                 MaterialTheme.colorScheme.onSurface
@@ -170,7 +170,7 @@ private fun NetworkModeSelector(
             text = {
                 Text(
                     "The ngrok free tier has usage limits. Bandwidth is capped and sessions may expire, " +
-                        "which can interrupt your public tunnel."
+                        "which can interrupt your public tunnel. Visit ngrok.com for current tier details."
                 )
             },
             confirmButton = {

@@ -45,7 +45,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-private val tunnelExpiryFormatter: DateTimeFormatter =
+private val tunnelExpiryTimeFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())
 
 @Composable
@@ -203,7 +203,7 @@ private fun TunnelStatusSection(
     }
     if (tunnelStatus == TunnelStatus.Active && tunnelSessionExpiresAt != null) {
         Text(
-            text = "Session expires at: ${tunnelSessionExpiresAt.toDisplayLabel()}",
+            text = "Session expires at: ${tunnelSessionExpiresAt.formatTunnelExpiry()}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -229,4 +229,4 @@ private fun TunnelStatusSection(
     }
 }
 
-private fun Instant?.toDisplayLabel(): String = this?.let { tunnelExpiryFormatter.format(it) } ?: "Unknown"
+private fun Instant?.formatTunnelExpiry(): String = this?.let { tunnelExpiryTimeFormatter.format(it) } ?: "Unknown"

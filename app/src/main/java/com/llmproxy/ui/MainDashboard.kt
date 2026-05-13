@@ -94,6 +94,26 @@ fun MainDashboard(
                     Text(text = "Latency p95: ${state.latencyP95Ms?.let { "${it}ms" } ?: "N/A"}")
                     Text(text = "Latency p99: ${state.latencyP99Ms?.let { "${it}ms" } ?: "N/A"}")
 
+                    // Restart metrics — show after at least one graceful restart has occurred.
+                    if (state.gracefulCloseCount > 0 || state.forcedCloseCount > 0) {
+                        Text(
+                            text = "Last restart — graceful: ${state.gracefulCloseCount}  " +
+                            "forced: ${state.forcedCloseCount}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (state.forcedCloseCount > 0)
+                                MaterialTheme.colorScheme.error
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (state.isRestartDraining) {
+                        Text(
+                            text = "Draining connections before restart\u2026",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
                     // Tunneling section: show public URL and status when in tunneling mode.
                     if (isTunneling) {
                         TunnelStatusSection(

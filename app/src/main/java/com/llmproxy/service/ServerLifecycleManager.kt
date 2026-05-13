@@ -26,8 +26,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -36,6 +39,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.ceil
+import androidx.work.WorkManager
 
 class ServerLifecycleManager(
     private val context: Context,
@@ -53,6 +57,19 @@ class ServerLifecycleManager(
     private val activeConnections = MutableStateFlow(0)
     private val _runtimeState = MutableStateFlow(ServerRuntimeState())
     val runtimeState: StateFlow<ServerRuntimeState> = _runtimeState.asStateFlow()
+
+    /**
+     * One-shot renewal events consumed by the ViewModel to surface snackbar feedback.
+     * Emitted from [renewCertificateIfNeeded] and [requestLetsEncryptCertificate].
+     */
+    private val _renewalEvents = MutableSharedFlow<RenewalEvent>(extraBufferCapacity = 8)
+    val renewalEvents: SharedFlow<RenewalEvent> = _renewalEvents.asSharedFlow()
+
+    /**
+     * Set to true by [stopServer] before acquiring [lifecycleMutex] so that a concurrent
+     * drain window in [gracefulRestartLocked] can detect the shutdown and cancel the restart.
+     */
+    @Volatile private var isShutdownRequested = false
 
     private var serverEngine: ApplicationEngine? = null
     // Holds the active tunnel session when in tunneling mode; null otherwise.
@@ -93,6 +110,7 @@ class ServerLifecycleManager(
 
     suspend fun startServer() {
         lifecycleMutex.withLock {
+            isShutdownRequested = false
             if (serverEngine != null) return
 
             val config = settingsRepository.serverConfig.value
@@ -153,6 +171,8 @@ class ServerLifecycleManager(
     }
 
     suspend fun stopServer() {
+        // Signal any active drain window to abort the restart before we compete for the lock.
+        isShutdownRequested = true
         lifecycleMutex.withLock {
             // Close the tunnel before stopping the engine so ngrok can clean up.
             tunnelReconnectJob?.cancel()
@@ -177,6 +197,8 @@ class ServerLifecycleManager(
             }
             serverEngine = null
             activeConnections.value = 0
+            // Cancel any queued renewal work to prevent a duplicate renewal attempt after shutdown.
+            WorkManager.getInstance(context).cancelUniqueWork(CertificateRenewalWorker.UNIQUE_WORK_NAME)
             _runtimeState.value = _runtimeState.value.copy(
                 status = ServerStatus.Stopped,
                 localEndpoint = NetworkUtils.formatLocalEndpoint(
@@ -210,6 +232,7 @@ class ServerLifecycleManager(
                 return
             }
 
+            _renewalEvents.tryEmit(RenewalEvent.Started)
             val result = runAcmeFlowLocked(config.letsEncryptDomain)
             _runtimeState.update {
                 it.copy(
@@ -217,8 +240,13 @@ class ServerLifecycleManager(
                     certWarning = result.warning,
                 )
             }
-            if (result.success && serverEngine != null) {
-                gracefulRestartLocked()
+            if (result.success) {
+                _renewalEvents.tryEmit(RenewalEvent.Succeeded)
+                if (serverEngine != null) {
+                    gracefulRestartLocked()
+                }
+            } else {
+                _renewalEvents.tryEmit(RenewalEvent.Failed(canRetry = true))
             }
         }
     }
@@ -234,6 +262,7 @@ class ServerLifecycleManager(
                 _runtimeState.update { it.copy(certificateExpiresAt = sslCertGenerator.certificateExpiresAt()) }
                 return
             }
+            _renewalEvents.tryEmit(RenewalEvent.Started)
             val result = runAcmeFlowLocked(config.letsEncryptDomain)
             _runtimeState.update {
                 it.copy(
@@ -241,8 +270,13 @@ class ServerLifecycleManager(
                     certWarning = result.warning,
                 )
             }
-            if (result.success && serverEngine != null) {
-                gracefulRestartLocked()
+            if (result.success) {
+                _renewalEvents.tryEmit(RenewalEvent.Succeeded)
+                if (serverEngine != null) {
+                    gracefulRestartLocked()
+                }
+            } else {
+                _renewalEvents.tryEmit(RenewalEvent.Failed(canRetry = true))
             }
         }
     }
@@ -510,10 +544,15 @@ class ServerLifecycleManager(
         }
     }
 
-    // Graceful restart sequence:
-    // 1) Wait for active connections to drain (bounded by 30s)
-    // 2) Stop current engine
-    // 3) Recreate engine with fresh TLS material and start again
+    // Graceful restart drain-window state machine:
+    //
+    //   IDLE ──startRestart──► DRAINING ──allConnsGone──► RESTARTING ──► RUNNING
+    //                              │                          ▲
+    //                              └──drainTimeout──────────►┤  (forced close of remaining)
+    //                              │
+    //                              └──isShutdownRequested──► (cancel restart; stopServer() takes over)
+    //
+    // Must be called with lifecycleMutex held.
     private suspend fun gracefulRestartLocked() {
         if (serverEngine == null) return
         val config = settingsRepository.serverConfig.value
@@ -521,17 +560,56 @@ class ServerLifecycleManager(
         val effectiveBindAddress = if (isTunneling) ServerConfig.TUNNELING_BIND_ADDRESS else config.bindAddress
         val effectiveConfig = config.copy(bindAddress = effectiveBindAddress)
 
-        _runtimeState.update { it.copy(status = ServerStatus.Stopping) }
+        // IDLE → DRAINING
+        val connectionCountAtDrainStart = activeConnections.value
+        _runtimeState.update { it.copy(status = ServerStatus.Stopping, isRestartDraining = true) }
+        Logger.d("ServerLifecycleManager", "draining active connections: $connectionCountAtDrainStart")
+
         val drainCompleted = withTimeoutOrNull(DRAIN_CONNECTION_TIMEOUT_MS) {
             activeConnections.filter { it == 0 }.first()
         }
-        if (drainCompleted == null && activeConnections.value > 0) {
-            Logger.e(
-                "ServerLifecycleManager",
-                "Graceful restart drain timeout after ${DRAIN_CONNECTION_TIMEOUT_MS / 1000}s; forcing restart with ${activeConnections.value} active connections."
+
+        // Cancellation check: if stopServer() was called during the drain window, abort the
+        // restart and let stopServer() perform a clean shutdown instead.
+        if (isShutdownRequested) {
+            _runtimeState.update { it.copy(isRestartDraining = false) }
+            Logger.d("ServerLifecycleManager", "Graceful restart cancelled: server stop requested during drain window")
+            // Cancel any pending renewal work to avoid a duplicate attempt after shutdown.
+            WorkManager.getInstance(context).cancelUniqueWork(CertificateRenewalWorker.UNIQUE_WORK_NAME)
+            return
+        }
+
+        // DRAINING → GRACEFUL or FORCED
+        val forcedCount: Int
+        val gracefulCount: Int
+        if (drainCompleted != null) {
+            // All connections drained within the timeout window.
+            gracefulCount = connectionCountAtDrainStart
+            forcedCount = 0
+            Logger.d("ServerLifecycleManager", "connections closed gracefully: $gracefulCount")
+        } else {
+            // Drain timeout expired; remaining connections will be force-closed by engine.stop().
+            val remaining = activeConnections.value
+            gracefulCount = (connectionCountAtDrainStart - remaining).coerceAtLeast(0)
+            forcedCount = remaining
+            if (forcedCount > 0) {
+                Logger.e(
+                    "ServerLifecycleManager",
+                    "Graceful restart drain timeout after ${DRAIN_CONNECTION_TIMEOUT_MS / 1000}s; " +
+                        "connections forced close: $forcedCount"
+                )
+            }
+        }
+
+        _runtimeState.update {
+            it.copy(
+                isRestartDraining = false,
+                gracefulCloseCount = it.gracefulCloseCount + gracefulCount,
+                forcedCloseCount = it.forcedCloseCount + forcedCount,
             )
         }
 
+        // FORCED/GRACEFUL → RESTARTING
         runCatching {
             serverEngine?.stop(1_000, 5_000)
         }.onFailure { Logger.e("ServerLifecycleManager", "Failed to stop server during restart", it) }
@@ -539,5 +617,15 @@ class ServerLifecycleManager(
         closeTunnelLocked()
         sslCertGenerator.ensureCertificateFiles()
         startEngineLocked(config = config, effectiveConfig = effectiveConfig, isTunneling = isTunneling)
+    }
+
+    /** Events emitted during the certificate renewal lifecycle for UI feedback. */
+    sealed class RenewalEvent {
+        /** Auto-renew or manual renewal has begun. */
+        data object Started : RenewalEvent()
+        /** Certificate successfully renewed; new connections will use the fresh cert. */
+        data object Succeeded : RenewalEvent()
+        /** Renewal failed; the existing certificate remains in use. */
+        data class Failed(val canRetry: Boolean) : RenewalEvent()
     }
 }

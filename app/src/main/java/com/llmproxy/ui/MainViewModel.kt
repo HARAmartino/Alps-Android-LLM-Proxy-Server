@@ -10,6 +10,7 @@ import com.llmproxy.logging.SystemLogger
 import com.llmproxy.model.MainUiEffect
 import com.llmproxy.model.MainUiState
 import com.llmproxy.model.RecentError
+import com.llmproxy.service.ServerLifecycleManager.RenewalEvent
 import com.llmproxy.service.NetworkMonitor
 import com.llmproxy.service.ProxyForegroundService
 import com.llmproxy.service.ServerLifecycleManager
@@ -60,6 +61,27 @@ class MainViewModel(
                 kotlinx.coroutines.delay(30_000L)
             }
         }
+
+        // Forward certificate renewal events to the UI effect channel for snackbar display.
+        viewModelScope.launch {
+            serverLifecycleManager.renewalEvents.collect { event ->
+                val effect = when (event) {
+                    is RenewalEvent.Started ->
+                        MainUiEffect.ShowRenewalMessage("Renewing certificate\u2026")
+                    is RenewalEvent.Succeeded ->
+                        MainUiEffect.ShowRenewalResult(
+                            message = "Certificate renewed. No restart required for new connections.",
+                            canRetry = false,
+                        )
+                    is RenewalEvent.Failed ->
+                        MainUiEffect.ShowRenewalResult(
+                            message = "Renewal failed. Using existing cert. Tap to retry.",
+                            canRetry = event.canRetry,
+                        )
+                }
+                effectsFlow.emit(effect)
+            }
+        }
     }
 
     val uiState: StateFlow<MainUiState> = combine(
@@ -89,6 +111,9 @@ class MainViewModel(
                 acmeInProgress = runtimeState.acmeInProgress,
                 certWarning = runtimeState.certWarning,
                 recentErrors = recentErrors,
+                gracefulCloseCount = runtimeState.gracefulCloseCount,
+                forcedCloseCount = runtimeState.forcedCloseCount,
+                isRestartDraining = runtimeState.isRestartDraining,
             )
         }.stateIn(
         scope = viewModelScope,

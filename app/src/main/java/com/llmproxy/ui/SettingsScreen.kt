@@ -38,7 +38,6 @@ import com.llmproxy.model.ServerConfig
 import com.llmproxy.util.OemOptimizationGuide
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import kotlin.time.Duration.Companion.milliseconds
 
 private val certificateExpiryFormatter: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())
@@ -149,7 +148,7 @@ fun SettingsScreen(
             Text("Battery Optimization Guide")
         }
         Text(
-            text = "Total lock-active time: ${state.totalLockActiveMs.milliseconds.toString()}",
+            text = "Total lock-active time: ${formatLockDuration(state.totalLockActiveMs)}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -418,4 +417,17 @@ private fun NetworkModeSelector(
             },
         )
     }
+}
+
+private fun formatLockDuration(totalMs: Long): String {
+    if (totalMs <= 0) return "0s"
+    val totalSeconds = totalMs / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return buildString {
+        if (hours > 0) append("${hours}h ")
+        if (minutes > 0 || hours > 0) append("${minutes}m ")
+        append("${seconds}s")
+    }.trim()
 }

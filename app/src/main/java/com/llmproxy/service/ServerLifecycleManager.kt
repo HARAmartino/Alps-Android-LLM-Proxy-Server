@@ -44,6 +44,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.ceil
+import kotlin.time.Duration.Companion.minutes
 
 class ServerLifecycleManager(
     private val context: Context,
@@ -523,7 +524,7 @@ class ServerLifecycleManager(
         private const val TUNNEL_RECONNECT_BACKOFF_BASE_MS = 2_000L
         private const val TUNNEL_RECONNECT_BACKOFF_MAX_MS = 15_000L
         private const val DRAIN_CONNECTION_TIMEOUT_MS = 30_000L
-        private const val POWER_LOCK_TIMEOUT_MS = 15 * 60 * 1000L
+        private val POWER_LOCK_TIMEOUT_MS = 15.minutes.inWholeMilliseconds
         private const val POWER_LOCK_REFRESH_MARGIN_MS = 30_000L
     }
 
@@ -642,8 +643,9 @@ class ServerLifecycleManager(
             lockSessionStartedAtElapsedMs = null
         }
 
-        val totalMs = lockActiveAccumulatedMs + if (anyLockActive) {
-            now - (lockSessionStartedAtElapsedMs ?: now)
+        val activeSince = lockSessionStartedAtElapsedMs
+        val totalMs = lockActiveAccumulatedMs + if (anyLockActive && activeSince != null) {
+            now - activeSince
         } else {
             0L
         }

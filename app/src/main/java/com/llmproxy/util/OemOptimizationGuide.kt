@@ -16,7 +16,13 @@ import android.provider.Settings
 object OemOptimizationGuide {
 
     fun manufacturerDisplayName(rawManufacturer: String = Build.MANUFACTURER): String =
-        rawManufacturer.trim().ifBlank { "Unknown" }.replaceFirstChar { it.titlecase() }
+        rawManufacturer
+            .trim()
+            .ifBlank { "Unknown" }
+            .split(Regex("\\s+"))
+            .joinToString(" ") { word ->
+                word.lowercase().replaceFirstChar { it.titlecase() }
+            }
 
     fun instructions(rawManufacturer: String = Build.MANUFACTURER): List<String> {
         return when (normalizeManufacturer(rawManufacturer)) {
@@ -102,4 +108,3 @@ object OemOptimizationGuide {
     private fun normalizeManufacturer(rawManufacturer: String): String =
         rawManufacturer.trim().lowercase()
 }
-

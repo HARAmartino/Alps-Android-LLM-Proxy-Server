@@ -8,6 +8,7 @@ import com.llmproxy.LlmProxyApplication
 import com.llmproxy.data.SettingsRepository
 import com.llmproxy.model.MainUiEffect
 import com.llmproxy.model.MainUiState
+import com.llmproxy.service.NetworkMonitor
 import com.llmproxy.service.ProxyForegroundService
 import com.llmproxy.service.ServerLifecycleManager
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -22,6 +23,7 @@ class MainViewModel(
     application: Application,
     private val settingsRepository: SettingsRepository,
     private val serverLifecycleManager: ServerLifecycleManager,
+    private val networkMonitor: NetworkMonitor,
 ) : AndroidViewModel(application) {
     private val app = application as LlmProxyApplication
     private val effectsFlow = MutableSharedFlow<MainUiEffect>()
@@ -30,12 +32,15 @@ class MainViewModel(
     val uiState: StateFlow<MainUiState> = combine(
         settingsRepository.serverConfig,
         serverLifecycleManager.runtimeState,
-    ) { config, runtimeState ->
+        networkMonitor.networkState,
+    ) { config, runtimeState, networkState ->
         MainUiState(
             config = config,
             serverStatus = runtimeState.status,
             activeConnections = runtimeState.activeConnections,
             localEndpoint = runtimeState.localEndpoint,
+            networkType = networkState.type,
+            publicIp = networkState.ip,
             certificateReady = app.sslCertGenerator.hasCertificateFiles(),
             lastError = runtimeState.lastError,
         )
@@ -94,6 +99,7 @@ class MainViewModel(
                 application = application,
                 settingsRepository = application.settingsRepository,
                 serverLifecycleManager = application.serverLifecycleManager,
+                networkMonitor = application.networkMonitor,
             ) as T
         }
     }

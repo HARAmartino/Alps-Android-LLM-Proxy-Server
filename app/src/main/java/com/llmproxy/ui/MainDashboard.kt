@@ -40,6 +40,8 @@ fun MainDashboard(
                 Text(text = "Server status", style = MaterialTheme.typography.titleMedium)
                 Text(text = state.serverStatus.name)
                 Text(text = "Local endpoint: ${state.localEndpoint}")
+                Text(text = "Network: ${state.networkType.name}")
+                Text(text = "Public IP: ${state.publicIp ?: "Unavailable"}")
                 Text(text = "Active connections: ${state.activeConnections}")
                 state.lastError?.takeIf { it.isNotBlank() }?.let { error ->
                     Text(text = error, color = MaterialTheme.colorScheme.error)

@@ -95,8 +95,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.bouncycastle:bcprov-jdk18on:1.84")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.84")
-    implementation("org.shredzone.acme4j:acme4j-client:3.5.1")
-    implementation("org.shredzone.acme4j:acme4j-utils:3.5.1")
+    implementation("org.shredzone.acme4j:acme4j-client:2.16")
+    implementation("org.shredzone.acme4j:acme4j-utils:2.16")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

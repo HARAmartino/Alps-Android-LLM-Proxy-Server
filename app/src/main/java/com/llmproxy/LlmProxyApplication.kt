@@ -114,6 +114,7 @@ class LlmProxyApplication : Application() {
             tunnelingClient = ngrokRestClient,
             networkMonitor = networkMonitor,
             accessLogger = accessLogger,
+            systemLogger = systemLogger,
         )
     }
 

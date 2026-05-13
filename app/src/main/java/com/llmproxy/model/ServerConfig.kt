@@ -12,6 +12,8 @@ data class ServerConfig(
     val cloudflareApiToken: String = "",
     /** Optional webhook URL for external log forwarding (encrypted at rest). */
     val webhookForwardUrl: String = "",
+    val enableWakeLock: Boolean = false,
+    val enableWifiLock: Boolean = false,
 ) {
     val isReady: Boolean = upstreamUrl.isNotBlank() && apiKey.isNotBlank()
 

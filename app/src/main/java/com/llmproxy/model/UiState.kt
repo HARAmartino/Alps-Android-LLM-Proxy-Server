@@ -38,6 +38,12 @@ data class ServerRuntimeState(
     val forcedCloseCount: Int = 0,
     /** True while the graceful restart drain window is active. */
     val isRestartDraining: Boolean = false,
+    /** True when a PARTIAL_WAKE_LOCK is currently held. */
+    val isWakeLockActive: Boolean = false,
+    /** True when a WIFI_MODE_FULL_HIGH_PERF WifiLock is currently held. */
+    val isWifiLockActive: Boolean = false,
+    /** Total elapsed time where at least one power lock has been active. */
+    val totalLockActiveMs: Long = 0L,
 )
 
 data class MainUiState(
@@ -56,6 +62,8 @@ data class MainUiState(
     val latencyP99Ms: Long? = null,
     val showManualTunnelReconnect: Boolean = false,
     val hasSeenTunnelingInfoDialog: Boolean = false,
+    val hasSeenBatteryOptimizationGuideDialog: Boolean = false,
+    val batteryOptimizationGuideDontShowAgain: Boolean = false,
     val certificateExpiresAt: Instant? = null,
     val acmeInProgress: Boolean = false,
     val certWarning: String? = null,
@@ -67,6 +75,9 @@ data class MainUiState(
     val forcedCloseCount: Int = 0,
     /** True while the graceful restart drain window is active. */
     val isRestartDraining: Boolean = false,
+    val isWakeLockActive: Boolean = false,
+    val isWifiLockActive: Boolean = false,
+    val totalLockActiveMs: Long = 0L,
 )
 
 sealed interface MainUiEffect {

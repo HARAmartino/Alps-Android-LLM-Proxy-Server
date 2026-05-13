@@ -31,8 +31,12 @@ class SettingsRepository(
     private val networkModeKey = stringPreferencesKey("network_mode")
     private val tunnelPublicUrlKey = stringPreferencesKey("tunnel_public_url")
     private val tunnelingInfoDialogShownKey = booleanPreferencesKey("tunneling_info_dialog_shown")
+    private val batteryOptimizationGuideShownKey = booleanPreferencesKey("battery_optimization_guide_shown")
+    private val batteryOptimizationGuideDontShowAgainKey = booleanPreferencesKey("battery_optimization_guide_dont_show_again")
     private val letsEncryptDomainKey = stringPreferencesKey("lets_encrypt_domain")
     private val letsEncryptAutoRenewKey = booleanPreferencesKey("lets_encrypt_auto_renew")
+    private val enableWakeLockKey = booleanPreferencesKey("enable_wake_lock")
+    private val enableWifiLockKey = booleanPreferencesKey("enable_wifi_lock")
 
     val serverConfig: StateFlow<ServerConfig> = combine(
         combine(
@@ -73,6 +77,36 @@ class SettingsRepository(
             }
         }
         .map { preferences -> preferences[tunnelingInfoDialogShownKey] ?: false }
+        .stateIn(
+            scope = applicationScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
+
+    val batteryOptimizationGuideShown: StateFlow<Boolean> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) {
+                emit(emptyPreferences())
+            } else {
+                throw exception
+            }
+        }
+        .map { preferences -> preferences[batteryOptimizationGuideShownKey] ?: false }
+        .stateIn(
+            scope = applicationScope,
+            started = SharingStarted.Eagerly,
+            initialValue = false,
+        )
+
+    val batteryOptimizationGuideDontShowAgain: StateFlow<Boolean> = context.dataStore.data
+        .catch { exception ->
+            if (exception is IOException) {
+                emit(emptyPreferences())
+            } else {
+                throw exception
+            }
+        }
+        .map { preferences -> preferences[batteryOptimizationGuideDontShowAgainKey] ?: false }
         .stateIn(
             scope = applicationScope,
             started = SharingStarted.Eagerly,
@@ -123,6 +157,18 @@ class SettingsRepository(
         }
     }
 
+    suspend fun updateEnableWakeLock(value: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[enableWakeLockKey] = value
+        }
+    }
+
+    suspend fun updateEnableWifiLock(value: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[enableWifiLockKey] = value
+        }
+    }
+
     suspend fun updateCloudflareApiToken(value: String) {
         securePreferences.setCloudflareApiToken(value.trim())
     }
@@ -148,6 +194,18 @@ class SettingsRepository(
         }
     }
 
+    suspend fun markBatteryOptimizationGuideShown() {
+        context.dataStore.edit { preferences ->
+            preferences[batteryOptimizationGuideShownKey] = true
+        }
+    }
+
+    suspend fun updateBatteryOptimizationGuideDontShowAgain(value: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[batteryOptimizationGuideDontShowAgainKey] = value
+        }
+    }
+
     private fun toBaseConfig(preferences: Preferences): ServerConfig {
         return ServerConfig(
             upstreamUrl = preferences[upstreamUrlKey].orEmpty(),
@@ -156,6 +214,8 @@ class SettingsRepository(
             networkMode = preferences[networkModeKey] ?: ServerConfig.NETWORK_MODE_LOCAL,
             letsEncryptDomain = preferences[letsEncryptDomainKey].orEmpty(),
             letsEncryptAutoRenew = preferences[letsEncryptAutoRenewKey] ?: false,
+            enableWakeLock = preferences[enableWakeLockKey] ?: false,
+            enableWifiLock = preferences[enableWifiLockKey] ?: false,
         )
     }
 }

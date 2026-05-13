@@ -87,10 +87,12 @@ class MainViewModel(
     val uiState: StateFlow<MainUiState> = combine(
         settingsRepository.serverConfig,
         settingsRepository.tunnelingInfoDialogShown,
+        settingsRepository.batteryOptimizationGuideShown,
+        settingsRepository.batteryOptimizationGuideDontShowAgain,
         serverLifecycleManager.runtimeState,
         networkMonitor.networkState,
         recentErrorsFlow,
-    ) { config, tunnelingInfoDialogShown, runtimeState, networkState, recentErrors ->
+    ) { config, tunnelingInfoDialogShown, batteryGuideShown, batteryGuideDontShowAgain, runtimeState, networkState, recentErrors ->
             MainUiState(
             config = config,
             serverStatus = runtimeState.status,
@@ -104,9 +106,11 @@ class MainViewModel(
             tunnelPublicUrl = runtimeState.tunnelPublicUrl,
             tunnelSessionExpiresAt = runtimeState.tunnelSessionExpiresAt,
             latencyP95Ms = runtimeState.latencyP95Ms,
-            latencyP99Ms = runtimeState.latencyP99Ms,
+                latencyP99Ms = runtimeState.latencyP99Ms,
                 showManualTunnelReconnect = runtimeState.showManualTunnelReconnect,
                 hasSeenTunnelingInfoDialog = tunnelingInfoDialogShown,
+                hasSeenBatteryOptimizationGuideDialog = batteryGuideShown,
+                batteryOptimizationGuideDontShowAgain = batteryGuideDontShowAgain,
                 certificateExpiresAt = runtimeState.certificateExpiresAt,
                 acmeInProgress = runtimeState.acmeInProgress,
                 certWarning = runtimeState.certWarning,
@@ -114,6 +118,9 @@ class MainViewModel(
                 gracefulCloseCount = runtimeState.gracefulCloseCount,
                 forcedCloseCount = runtimeState.forcedCloseCount,
                 isRestartDraining = runtimeState.isRestartDraining,
+                isWakeLockActive = runtimeState.isWakeLockActive,
+                isWifiLockActive = runtimeState.isWifiLockActive,
+                totalLockActiveMs = runtimeState.totalLockActiveMs,
             )
         }.stateIn(
         scope = viewModelScope,
@@ -179,6 +186,25 @@ class MainViewModel(
     fun onTunnelingInfoDialogShown() {
         viewModelScope.launch {
             settingsRepository.markTunnelingInfoDialogShown()
+        }
+    }
+
+    fun onBatteryOptimizationGuideHandled(dontShowAgain: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.markBatteryOptimizationGuideShown()
+            settingsRepository.updateBatteryOptimizationGuideDontShowAgain(dontShowAgain)
+        }
+    }
+
+    fun onEnableWakeLockChanged(value: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateEnableWakeLock(value)
+        }
+    }
+
+    fun onEnableWifiLockChanged(value: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateEnableWifiLock(value)
         }
     }
 

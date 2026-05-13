@@ -67,6 +67,7 @@ internal fun Application.installProxyRoutes(
                             override val contentLength: Long? = upstreamResponse.contentLength()
                             override val contentType = upstreamResponse.contentType()
                             override val headers = ProxyRequestMapper.sanitizeResponseHeaders(upstreamResponse.headers)
+                            // Forward upstream status transparently, including non-2xx responses.
                             override val status = upstreamResponse.status
 
                             override suspend fun writeTo(channel: ByteWriteChannel) {

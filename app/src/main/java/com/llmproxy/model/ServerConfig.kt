@@ -7,6 +7,9 @@ data class ServerConfig(
     val bindAddress: String = DEFAULT_BIND_ADDRESS,
     val networkMode: String = NETWORK_MODE_LOCAL,
     val tunnelAuthToken: String = "",
+    val letsEncryptDomain: String = "",
+    val letsEncryptAutoRenew: Boolean = false,
+    val cloudflareApiToken: String = "",
 ) {
     val isReady: Boolean = upstreamUrl.isNotBlank() && apiKey.isNotBlank()
 

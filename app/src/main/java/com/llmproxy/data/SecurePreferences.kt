@@ -27,10 +27,15 @@ class SecurePreferences(context: Context) {
     private val tunnelAuthTokenState = MutableStateFlow(
         sharedPreferences.getString(KEY_TUNNEL_AUTH_TOKEN, "").orEmpty()
     )
+    private val cloudflareApiTokenState = MutableStateFlow(
+        sharedPreferences.getString(KEY_CLOUDFLARE_API_TOKEN, "").orEmpty()
+    )
 
     fun apiKeyFlow(): StateFlow<String> = apiKeyState.asStateFlow()
 
     fun tunnelAuthTokenFlow(): StateFlow<String> = tunnelAuthTokenState.asStateFlow()
+
+    fun cloudflareApiTokenFlow(): StateFlow<String> = cloudflareApiTokenState.asStateFlow()
 
     suspend fun setApiKey(apiKey: String) {
         sharedPreferences.edit().putString(KEY_API_KEY, apiKey).apply()
@@ -42,9 +47,15 @@ class SecurePreferences(context: Context) {
         tunnelAuthTokenState.value = token
     }
 
+    suspend fun setCloudflareApiToken(token: String) {
+        sharedPreferences.edit().putString(KEY_CLOUDFLARE_API_TOKEN, token).apply()
+        cloudflareApiTokenState.value = token
+    }
+
     companion object {
         private const val FILE_NAME = "secure_settings"
         private const val KEY_API_KEY = "api_key"
         private const val KEY_TUNNEL_AUTH_TOKEN = "tunnel_auth_token"
+        private const val KEY_CLOUDFLARE_API_TOKEN = "cloudflare_api_token"
     }
 }

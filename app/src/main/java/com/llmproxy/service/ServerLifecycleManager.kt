@@ -1,6 +1,7 @@
 package com.llmproxy.service
 
 import android.content.Context
+import com.llmproxy.acme.AcmeCertManager
 import com.llmproxy.client.tunneling.TunnelSession
 import com.llmproxy.client.tunneling.TunnelingClient
 import com.llmproxy.client.tunneling.TunnelingException
@@ -22,6 +23,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,6 +33,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.ceil
 
 class ServerLifecycleManager(
@@ -38,6 +42,7 @@ class ServerLifecycleManager(
     private val settingsRepository: SettingsRepository,
     private val sslCertGenerator: SslCertGenerator,
     private val sslContextLoader: SslContextLoader,
+    private val acmeCertManager: AcmeCertManager? = null,
     private val upstreamClient: HttpClient,
     private val tunnelingClient: TunnelingClient? = null,
     private val networkMonitor: NetworkMonitor? = null,
@@ -59,6 +64,9 @@ class ServerLifecycleManager(
     }
 
     init {
+        _runtimeState.update {
+            it.copy(certificateExpiresAt = sslCertGenerator.certificateExpiresAt())
+        }
         applicationScope.launch {
             activeConnections.collect { count ->
                 _runtimeState.update { it.copy(activeConnections = count) }
@@ -105,24 +113,23 @@ class ServerLifecycleManager(
                 tunnelPublicUrl = null,
                 tunnelSessionExpiresAt = null,
                 showManualTunnelReconnect = false,
+                certificateExpiresAt = sslCertGenerator.certificateExpiresAt(),
             )
 
             try {
-                sslCertGenerator.ensureCertificateFiles()
-                serverEngine = proxyServerFactory.create(
-                    config = effectiveConfig,
-                    activeConnections = activeConnections,
-                    onRequestLatencyMeasured = ::recordLatencySample,
-                ).also { engine -> engine.start(wait = false) }
-                _runtimeState.value = _runtimeState.value.copy(status = ServerStatus.Running)
-
-                // After the server is up, create the ngrok tunnel if in tunneling mode.
-                if (isTunneling) {
-                    val created = startTunnelLocked(config)
-                    if (!created) {
-                        scheduleTunnelReconnectLocked(reason = "initial tunnel setup failed")
+                val needsLetsEncryptCertificate = config.letsEncryptDomain.isNotBlank() &&
+                    config.cloudflareApiToken.isNotBlank() &&
+                    sslCertGenerator.certificateSource() != SslCertGenerator.CERT_SOURCE_LETS_ENCRYPT
+                if (needsLetsEncryptCertificate) {
+                    val acmeResult = runAcmeFlowLocked(config.letsEncryptDomain)
+                    if (!acmeResult.success) {
+                        _runtimeState.update { state ->
+                            state.copy(certWarning = acmeResult.warning)
+                        }
                     }
                 }
+                sslCertGenerator.ensureCertificateFiles()
+                startEngineLocked(config = config, effectiveConfig = effectiveConfig, isTunneling = isTunneling)
             } catch (error: Exception) {
                 Logger.e("ServerLifecycleManager", "Failed to start server", error)
                 serverEngine = null
@@ -132,6 +139,7 @@ class ServerLifecycleManager(
                     tunnelStatus = TunnelStatus.Idle,
                     tunnelSessionExpiresAt = null,
                     showManualTunnelReconnect = false,
+                    certWarning = "Server start failed while preparing TLS material.",
                 )
             }
         }
@@ -174,7 +182,61 @@ class ServerLifecycleManager(
                 tunnelPublicUrl = null,
                 tunnelSessionExpiresAt = null,
                 showManualTunnelReconnect = false,
+                certificateExpiresAt = sslCertGenerator.certificateExpiresAt(),
             )
+        }
+    }
+
+    suspend fun requestLetsEncryptCertificate() {
+        lifecycleMutex.withLock {
+            val config = settingsRepository.serverConfig.value
+            if (config.letsEncryptDomain.isBlank()) {
+                _runtimeState.update {
+                    it.copy(certWarning = "Domain is required for Let's Encrypt.")
+                }
+                return
+            }
+            if (config.cloudflareApiToken.isBlank()) {
+                _runtimeState.update {
+                    it.copy(certWarning = "Cloudflare API token is required for DNS-01 validation.")
+                }
+                return
+            }
+
+            val result = runAcmeFlowLocked(config.letsEncryptDomain)
+            _runtimeState.update {
+                it.copy(
+                    certificateExpiresAt = result.expiresAt ?: sslCertGenerator.certificateExpiresAt(),
+                    certWarning = result.warning,
+                )
+            }
+            if (result.success && serverEngine != null) {
+                gracefulRestartLocked()
+            }
+        }
+    }
+
+    suspend fun renewCertificateIfNeeded() {
+        lifecycleMutex.withLock {
+            val config = settingsRepository.serverConfig.value
+            val acmeManager = acmeCertManager ?: return
+            if (!config.letsEncryptAutoRenew || config.letsEncryptDomain.isBlank() || config.cloudflareApiToken.isBlank()) {
+                return
+            }
+            if (!acmeManager.shouldRenewWithin(days = 30)) {
+                _runtimeState.update { it.copy(certificateExpiresAt = sslCertGenerator.certificateExpiresAt()) }
+                return
+            }
+            val result = runAcmeFlowLocked(config.letsEncryptDomain)
+            _runtimeState.update {
+                it.copy(
+                    certificateExpiresAt = result.expiresAt ?: sslCertGenerator.certificateExpiresAt(),
+                    certWarning = result.warning,
+                )
+            }
+            if (result.success && serverEngine != null) {
+                gracefulRestartLocked()
+            }
         }
     }
 
@@ -386,5 +448,89 @@ class ServerLifecycleManager(
         private const val TUNNEL_RECONNECT_MAX_RETRIES = 4
         private const val TUNNEL_RECONNECT_BACKOFF_BASE_MS = 2_000L
         private const val TUNNEL_RECONNECT_BACKOFF_MAX_MS = 15_000L
+        private const val DRAIN_CONNECTION_TIMEOUT_MS = 30_000L
+    }
+
+    private suspend fun runAcmeFlowLocked(domain: String): AcmeCertManager.AcmeResult {
+        val manager = acmeCertManager ?: return AcmeCertManager.AcmeResult(
+            success = false,
+            expiresAt = sslCertGenerator.certificateExpiresAt(),
+            warning = "ACME manager is not configured.",
+        )
+        _runtimeState.update { it.copy(acmeInProgress = true, certWarning = null) }
+        return try {
+            manager.requestCertificate(domain).also { result ->
+                _runtimeState.update {
+                    it.copy(
+                        acmeInProgress = false,
+                        certificateExpiresAt = result.expiresAt ?: sslCertGenerator.certificateExpiresAt(),
+                    )
+                }
+            }
+        } catch (error: Exception) {
+            _runtimeState.update {
+                it.copy(
+                    acmeInProgress = false,
+                    certWarning = "Let's Encrypt failed (${error.message ?: "unknown error"}). Using self-signed certificate.",
+                    certificateExpiresAt = sslCertGenerator.certificateExpiresAt(),
+                )
+            }
+            AcmeCertManager.AcmeResult(
+                success = false,
+                expiresAt = sslCertGenerator.certificateExpiresAt(),
+                warning = "Let's Encrypt failed (${error.message ?: "unknown error"}). Using self-signed certificate.",
+            )
+        }
+    }
+
+    private suspend fun startEngineLocked(config: ServerConfig, effectiveConfig: ServerConfig, isTunneling: Boolean) {
+        serverEngine = proxyServerFactory.create(
+            config = effectiveConfig,
+            activeConnections = activeConnections,
+            onRequestLatencyMeasured = ::recordLatencySample,
+        ).also { engine -> engine.start(wait = false) }
+        _runtimeState.value = _runtimeState.value.copy(
+            status = ServerStatus.Running,
+            certificateExpiresAt = sslCertGenerator.certificateExpiresAt(),
+        )
+
+        // After the server is up, create the ngrok tunnel if in tunneling mode.
+        if (isTunneling) {
+            val created = startTunnelLocked(config)
+            if (!created) {
+                scheduleTunnelReconnectLocked(reason = "initial tunnel setup failed")
+            }
+        }
+    }
+
+    // Graceful restart sequence:
+    // 1) Wait for active connections to drain (bounded by 30s)
+    // 2) Stop current engine
+    // 3) Recreate engine with fresh TLS material and start again
+    private suspend fun gracefulRestartLocked() {
+        if (serverEngine == null) return
+        val config = settingsRepository.serverConfig.value
+        val isTunneling = config.networkMode == ServerConfig.NETWORK_MODE_TUNNELING
+        val effectiveBindAddress = if (isTunneling) ServerConfig.TUNNELING_BIND_ADDRESS else config.bindAddress
+        val effectiveConfig = config.copy(bindAddress = effectiveBindAddress)
+
+        _runtimeState.update { it.copy(status = ServerStatus.Stopping) }
+        val drainCompleted = withTimeoutOrNull(DRAIN_CONNECTION_TIMEOUT_MS) {
+            activeConnections.filter { it == 0 }.first()
+        }
+        if (drainCompleted == null && activeConnections.value > 0) {
+            Logger.e(
+                "ServerLifecycleManager",
+                "Graceful restart drain timeout after ${DRAIN_CONNECTION_TIMEOUT_MS / 1000}s; forcing restart with ${activeConnections.value} active connections."
+            )
+        }
+
+        runCatching {
+            serverEngine?.stop(1_000, 5_000)
+        }.onFailure { Logger.e("ServerLifecycleManager", "Failed to stop server during restart", it) }
+        serverEngine = null
+        closeTunnelLocked()
+        sslCertGenerator.ensureCertificateFiles()
+        startEngineLocked(config = config, effectiveConfig = effectiveConfig, isTunneling = isTunneling)
     }
 }

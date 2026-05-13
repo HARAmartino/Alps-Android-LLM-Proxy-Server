@@ -21,6 +21,9 @@ data class ServerRuntimeState(
     val latencyP95Ms: Long? = null,
     val latencyP99Ms: Long? = null,
     val showManualTunnelReconnect: Boolean = false,
+    val certificateExpiresAt: Instant? = null,
+    val acmeInProgress: Boolean = false,
+    val certWarning: String? = null,
 )
 
 data class MainUiState(
@@ -39,6 +42,9 @@ data class MainUiState(
     val latencyP99Ms: Long? = null,
     val showManualTunnelReconnect: Boolean = false,
     val hasSeenTunnelingInfoDialog: Boolean = false,
+    val certificateExpiresAt: Instant? = null,
+    val acmeInProgress: Boolean = false,
+    val certWarning: String? = null,
 )
 
 sealed interface MainUiEffect {

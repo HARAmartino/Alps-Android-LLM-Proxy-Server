@@ -31,6 +31,8 @@ class SettingsRepository(
     private val networkModeKey = stringPreferencesKey("network_mode")
     private val tunnelPublicUrlKey = stringPreferencesKey("tunnel_public_url")
     private val tunnelingInfoDialogShownKey = booleanPreferencesKey("tunneling_info_dialog_shown")
+    private val letsEncryptDomainKey = stringPreferencesKey("lets_encrypt_domain")
+    private val letsEncryptAutoRenewKey = booleanPreferencesKey("lets_encrypt_auto_renew")
 
     val serverConfig: StateFlow<ServerConfig> = combine(
         context.dataStore.data
@@ -44,8 +46,13 @@ class SettingsRepository(
             .map(::toBaseConfig),
         securePreferences.apiKeyFlow(),
         securePreferences.tunnelAuthTokenFlow(),
-    ) { baseConfig, apiKey, tunnelAuthToken ->
-        baseConfig.copy(apiKey = apiKey, tunnelAuthToken = tunnelAuthToken)
+        securePreferences.cloudflareApiTokenFlow(),
+    ) { baseConfig, apiKey, tunnelAuthToken, cloudflareApiToken ->
+        baseConfig.copy(
+            apiKey = apiKey,
+            tunnelAuthToken = tunnelAuthToken,
+            cloudflareApiToken = cloudflareApiToken,
+        )
     }.stateIn(
         scope = applicationScope,
         started = SharingStarted.Eagerly,
@@ -99,6 +106,22 @@ class SettingsRepository(
         securePreferences.setTunnelAuthToken(value.trim())
     }
 
+    suspend fun updateLetsEncryptDomain(value: String) {
+        context.dataStore.edit { preferences ->
+            preferences[letsEncryptDomainKey] = value.trim()
+        }
+    }
+
+    suspend fun updateLetsEncryptAutoRenew(value: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[letsEncryptAutoRenewKey] = value
+        }
+    }
+
+    suspend fun updateCloudflareApiToken(value: String) {
+        securePreferences.setCloudflareApiToken(value.trim())
+    }
+
     /** Persists the last known tunnel public URL so it survives app restarts. */
     suspend fun updateTunnelPublicUrl(value: String?) {
         context.dataStore.edit { preferences ->
@@ -122,6 +145,8 @@ class SettingsRepository(
             listenPort = preferences[listenPortKey] ?: ServerConfig.DEFAULT_PORT,
             bindAddress = preferences[bindAddressKey] ?: ServerConfig.DEFAULT_BIND_ADDRESS,
             networkMode = preferences[networkModeKey] ?: ServerConfig.NETWORK_MODE_LOCAL,
+            letsEncryptDomain = preferences[letsEncryptDomainKey].orEmpty(),
+            letsEncryptAutoRenew = preferences[letsEncryptAutoRenewKey] ?: false,
         )
     }
 }

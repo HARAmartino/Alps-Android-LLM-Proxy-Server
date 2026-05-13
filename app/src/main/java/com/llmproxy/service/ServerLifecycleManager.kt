@@ -622,9 +622,9 @@ class ServerLifecycleManager(
     /** Events emitted during the certificate renewal lifecycle for UI feedback. */
     sealed class RenewalEvent {
         /** Auto-renew or manual renewal has begun. */
-        object Started : RenewalEvent()
+        data object Started : RenewalEvent()
         /** Certificate successfully renewed; new connections will use the fresh cert. */
-        object Succeeded : RenewalEvent()
+        data object Succeeded : RenewalEvent()
         /** Renewal failed; the existing certificate remains in use. */
         data class Failed(val canRetry: Boolean) : RenewalEvent()
     }

@@ -98,7 +98,7 @@ fun MainDashboard(
                     if (state.gracefulCloseCount > 0 || state.forcedCloseCount > 0) {
                         Text(
                             text = "Last restart — graceful: ${state.gracefulCloseCount}  " +
-                                "forced: ${state.forcedCloseCount}",
+                            "forced: ${state.forcedCloseCount}",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (state.forcedCloseCount > 0)
                                 MaterialTheme.colorScheme.error

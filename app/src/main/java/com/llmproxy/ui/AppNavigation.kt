@@ -60,8 +60,7 @@ fun LlmProxyApp(
                         viewModel.onRequestCertificateRequested()
                     }
                 }
-                else -> {} // ExportCertificate / ExportAccessLogs / ExportSystemLogs / ShowMessage
-                           // are handled in MainActivity.
+                else -> {} // ExportCertificate / ExportAccessLogs / ExportSystemLogs / ShowMessage are handled in MainActivity.
             }
         }
     }

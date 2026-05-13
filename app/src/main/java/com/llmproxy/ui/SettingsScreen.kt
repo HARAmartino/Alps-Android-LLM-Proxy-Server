@@ -35,6 +35,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.llmproxy.model.MainUiState
 import com.llmproxy.model.ServerConfig
+import com.llmproxy.util.Logger
+import com.llmproxy.util.formatElapsedDuration
 import com.llmproxy.util.OemOptimizationGuide
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -99,6 +101,7 @@ fun SettingsScreen(
                     val intent = OemOptimizationGuide.resolveSettingsIntent(context)
                     runCatching { context.startActivity(intent) }
                         .onFailure {
+                            Logger.e("SettingsScreen", "Failed to open battery optimization settings", it)
                             Toast.makeText(context, "Unable to open battery settings", Toast.LENGTH_SHORT).show()
                         }
                 },
@@ -130,7 +133,7 @@ fun SettingsScreen(
             Column(modifier = Modifier.weight(1f)) {
                 Text("Prevent Wi-Fi sleep while running")
                 Text(
-                    text = "Use only on charger",
+                    text = "Use only when charging",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -148,7 +151,7 @@ fun SettingsScreen(
             Text("Battery Optimization Guide")
         }
         Text(
-            text = "Total lock-active time: ${formatLockDuration(state.totalLockActiveMs)}",
+            text = "Total lock-active time: ${formatElapsedDuration(state.totalLockActiveMs)}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -417,17 +420,4 @@ private fun NetworkModeSelector(
             },
         )
     }
-}
-
-private fun formatLockDuration(totalMs: Long): String {
-    if (totalMs <= 0) return "0s"
-    val totalSeconds = totalMs / 1000
-    val hours = totalSeconds / 3600
-    val minutes = (totalSeconds % 3600) / 60
-    val seconds = totalSeconds % 60
-    return buildString {
-        if (hours > 0) append("${hours}h ")
-        if (minutes > 0 || hours > 0) append("${minutes}m ")
-        append("${seconds}s")
-    }.trim()
 }

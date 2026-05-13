@@ -40,11 +40,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.ceil
-import kotlin.time.Duration.Companion.minutes
 
 class ServerLifecycleManager(
     private val context: Context,
@@ -524,8 +524,14 @@ class ServerLifecycleManager(
         private const val TUNNEL_RECONNECT_BACKOFF_BASE_MS = 2_000L
         private const val TUNNEL_RECONNECT_BACKOFF_MAX_MS = 15_000L
         private const val DRAIN_CONNECTION_TIMEOUT_MS = 30_000L
-        private val POWER_LOCK_TIMEOUT_MS = 15.minutes.inWholeMilliseconds
+        // 15 minutes keeps lock holds bounded (WakeLock uses acquire(timeout); WifiLock is rotated
+        // by scheduler) while avoiding overly frequent acquire/release churn.
+        private const val POWER_LOCK_TIMEOUT_MS = 15 * 60 * 1000L
         private const val POWER_LOCK_REFRESH_MARGIN_MS = 30_000L
+        private const val POWER_LOCK_REFRESH_MIN_DELAY_MS = 1_000L
+        private const val POWER_LOCK_REFRESH_DELAY_MS = POWER_LOCK_TIMEOUT_MS - POWER_LOCK_REFRESH_MARGIN_MS
+        private const val WAKE_LOCK_TAG = "llmproxy:server_wakelock"
+        private const val WIFI_LOCK_TAG = "llmproxy:server_wifilock"
     }
 
     private fun reconcilePowerLocksLocked(config: ServerConfig) {
@@ -554,7 +560,7 @@ class ServerLifecycleManager(
     private fun acquireWakeLockLocked() {
         if (wakeLock?.isHeld == true) return
         val manager = powerManager ?: return
-        val candidate = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "llmproxy:server_wakelock")
+        val candidate = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
         var acquired = false
         try {
             candidate.setReferenceCounted(false)
@@ -567,7 +573,11 @@ class ServerLifecycleManager(
             Logger.e("ServerLifecycleManager", "Failed to acquire WakeLock", error)
         } finally {
             if (!acquired) {
-                runCatching { candidate.release() }
+                runCatching {
+                    if (candidate.isHeld) {
+                        candidate.release()
+                    }
+                }
             }
         }
     }
@@ -578,7 +588,7 @@ class ServerLifecycleManager(
         val manager = wifiManager ?: return
         val candidate = manager.createWifiLock(
             WifiManager.WIFI_MODE_FULL_HIGH_PERF,
-            "llmproxy:server_wifilock",
+            WIFI_LOCK_TAG,
         )
         var acquired = false
         try {
@@ -592,7 +602,11 @@ class ServerLifecycleManager(
             Logger.e("ServerLifecycleManager", "Failed to acquire WifiLock", error)
         } finally {
             if (!acquired) {
-                runCatching { candidate.release() }
+                runCatching {
+                    if (candidate.isHeld) {
+                        candidate.release()
+                    }
+                }
             }
         }
     }
@@ -644,11 +658,12 @@ class ServerLifecycleManager(
         }
 
         val activeSince = lockSessionStartedAtElapsedMs
-        val totalMs = lockActiveAccumulatedMs + if (anyLockActive && activeSince != null) {
+        val activeSessionDurationMs = if (anyLockActive && activeSince != null) {
             now - activeSince
         } else {
             0L
         }
+        val totalMs = lockActiveAccumulatedMs + activeSessionDurationMs
 
         _runtimeState.update {
             it.copy(
@@ -666,13 +681,18 @@ class ServerLifecycleManager(
         }
     }
 
+    private fun nextPowerLockRefreshDelayMs(): Long =
+        POWER_LOCK_REFRESH_DELAY_MS.coerceAtLeast(POWER_LOCK_REFRESH_MIN_DELAY_MS)
+
     private fun scheduleWakeLockRefreshLocked() {
         wakeLockRefreshJob?.cancel()
         wakeLockRefreshJob = applicationScope.launch {
-            delay((POWER_LOCK_TIMEOUT_MS - POWER_LOCK_REFRESH_MARGIN_MS).coerceAtLeast(1_000L))
+            delay(nextPowerLockRefreshDelayMs())
+            if (!isActive) return@launch
             lifecycleMutex.withLock {
                 val config = settingsRepository.serverConfig.value
                 if (wakeLock?.isHeld == true && serverEngine != null && config.enableWakeLock) {
+                    // WakeLock timeout cannot be extended in-place; rotate before timeout.
                     releaseWakeLockLocked()
                     acquireWakeLockLocked()
                     updateLockRuntimeStateLocked()
@@ -684,7 +704,8 @@ class ServerLifecycleManager(
     private fun scheduleWifiLockRefreshLocked() {
         wifiLockRefreshJob?.cancel()
         wifiLockRefreshJob = applicationScope.launch {
-            delay((POWER_LOCK_TIMEOUT_MS - POWER_LOCK_REFRESH_MARGIN_MS).coerceAtLeast(1_000L))
+            delay(nextPowerLockRefreshDelayMs())
+            if (!isActive) return@launch
             lifecycleMutex.withLock {
                 val config = settingsRepository.serverConfig.value
                 if (
@@ -693,6 +714,8 @@ class ServerLifecycleManager(
                     config.enableWifiLock &&
                     lastKnownNetworkType == NetworkType.WIFI
                 ) {
+                    // WifiLock has no timeout API, so we enforce bounded hold duration by
+                    // scheduler-driven release + reacquire while conditions still match.
                     releaseWifiLockLocked()
                     acquireWifiLockLocked()
                     updateLockRuntimeStateLocked()

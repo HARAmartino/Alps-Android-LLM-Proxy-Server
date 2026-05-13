@@ -44,6 +44,7 @@ import com.llmproxy.model.RecentError
 import com.llmproxy.model.ServerConfig
 import com.llmproxy.model.ServerStatus
 import com.llmproxy.model.TunnelStatus
+import com.llmproxy.util.formatElapsedDuration
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -112,7 +113,7 @@ fun MainDashboard(
                         }
                     }
                     Text(
-                        text = "Power lock time: ${formatLockDuration(state.totalLockActiveMs)}",
+                        text = "Power lock time: ${formatElapsedDuration(state.totalLockActiveMs)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -307,19 +308,6 @@ private fun TunnelStatusSection(
 }
 
 private fun Instant?.formatTunnelExpiry(): String = this?.let { tunnelExpiryTimeFormatter.format(it) } ?: "Unknown"
-
-private fun formatLockDuration(totalMs: Long): String {
-    if (totalMs <= 0) return "0s"
-    val totalSeconds = totalMs / 1000
-    val hours = totalSeconds / 3600
-    val minutes = (totalSeconds % 3600) / 60
-    val seconds = totalSeconds % 60
-    return buildString {
-        if (hours > 0) append("${hours}h ")
-        if (minutes > 0 || hours > 0) append("${minutes}m ")
-        append("${seconds}s")
-    }.trim()
-}
 
 /**
  * Expandable card showing the last up-to-10 ERROR-level system log entries.

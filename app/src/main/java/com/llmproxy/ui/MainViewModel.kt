@@ -37,9 +37,10 @@ class MainViewModel(
     private val recentErrorsFlow = MutableStateFlow<List<RecentError>>(emptyList())
 
     init {
-        // Poll recent errors every 30 s while the ViewModel is alive.
+        // Poll recent errors every 30 s. The loop is tied to viewModelScope:
+        // when the ViewModel is cleared the scope is cancelled and the coroutine stops.
         viewModelScope.launch {
-            while (true) {
+            while (kotlinx.coroutines.isActive) {
                 try {
                     val errors = systemLogger?.recentErrors()
                         ?.takeLast(10)

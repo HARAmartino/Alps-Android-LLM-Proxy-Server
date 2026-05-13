@@ -82,29 +82,49 @@ class AccessLogger(private val context: Context) {
     /**
      * Removes the oldest 50 % of log lines to reclaim space.
      *
-     * We use a two-pass approach:
-     *   1. Read all lines into memory.
-     *   2. Keep only the newest half.
-     *   3. Overwrite the file with the kept lines.
-     *
-     * This is intentionally simple (no circular buffer) because the file is
-     * already capped at 10 MB — a reasonable in-memory footprint.
+     * Instead of reading all lines into memory, we seek to the midpoint byte offset
+     * and scan forward to the next newline boundary, then copy only the retained
+     * tail of the file back to the beginning. This keeps peak memory usage at ~5 MB
+     * rather than the full 10 MB file size.
      */
     private fun rotateByDroppingOldestHalf() {
-        try {
-            val lines = logFile.readLines(Charsets.UTF_8)
-            if (lines.size < 2) return
+        if (!logFile.exists() || logFile.length() < 2) return
 
-            // Keep the newest half; discard the oldest half.
-            val keepFrom = lines.size / 2
-            val kept = lines.subList(keepFrom, lines.size)
+        try {
+            val fileLength = logFile.length()
+            val midpoint = fileLength / 2
+
+            // Find the byte offset of the first newline at or after the midpoint.
+            val keepFrom: Long = RandomAccessFile(logFile, "r").use { raf ->
+                raf.seek(midpoint)
+                // Scan forward to the end of the current line (find the '\n').
+                var pos = midpoint
+                while (pos < fileLength) {
+                    val byte = raf.read()
+                    if (byte == -1) break
+                    pos++
+                    if (byte.toChar() == '\n') break
+                }
+                pos
+            }
+
+            if (keepFrom >= fileLength) {
+                // Nothing to keep — clear the file.
+                logFile.writeText("")
+                return
+            }
+
+            // Read only the retained portion, then overwrite the file.
+            val retained: ByteArray = RandomAccessFile(logFile, "r").use { raf ->
+                raf.seek(keepFrom)
+                val size = (fileLength - keepFrom).toInt()
+                ByteArray(size).also { buf -> raf.readFully(buf) }
+            }
 
             RandomAccessFile(logFile, "rw").use { raf ->
                 raf.setLength(0)
                 raf.seek(0)
-                kept.forEach { line ->
-                    raf.write((line + "\n").toByteArray(Charsets.UTF_8))
-                }
+                raf.write(retained)
             }
         } catch (e: Exception) {
             android.util.Log.w(TAG, "Rotation failed, truncating file: ${e.message}")

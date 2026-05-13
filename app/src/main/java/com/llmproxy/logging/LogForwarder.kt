@@ -36,8 +36,11 @@ class RetryingLogForwarder(
                 return // success — exit early
             } catch (e: Exception) {
                 lastException = e
-                // Exponential back-off: 500 ms, 1000 ms, 1500 ms …
-                delay(500L * (attempt + 1))
+                // Only delay between retries, not after the final failed attempt.
+                if (attempt < maxRetries - 1) {
+                    // Exponential back-off: 500 ms, 1000 ms, …
+                    delay(500L * (attempt + 1))
+                }
             }
         }
         // All retries exhausted — log locally but do not rethrow.

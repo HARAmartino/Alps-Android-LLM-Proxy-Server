@@ -1,10 +1,12 @@
 package com.llmproxy.logging
 
 // Compile redaction regexes once to avoid recreating them on every call.
-private val API_KEY_REGEX = Regex("""(?i)(["']?api_key["']?\s*[:=]\s*["']?)[\w\-]+""")
+// The value patterns use a broad character class to cover API keys that may
+// contain dots, slashes, equals signs, or other URL-safe special characters.
+private val API_KEY_REGEX = Regex("""(?i)(["']?api_key["']?\s*[:=]\s*["']?)[\w\-.+/=]+""")
 private val AUTH_HEADER_REGEX = Regex("""(?i)(Authorization\s*:\s*)[\w\-. ]+""")
-private val TOKEN_REGEX = Regex("""(?i)(["']?token["']?\s*[:=]\s*["']?)[\w\-]+""")
-private val BEARER_REGEX = Regex("""(?i)(Bearer\s+)[\w\-.]+""")
+private val TOKEN_REGEX = Regex("""(?i)(["']?token["']?\s*[:=]\s*["']?)[\w\-.+/=]+""")
+private val BEARER_REGEX = Regex("""(?i)(Bearer\s+)[\w\-.+/=]+""")
 
 /**
  * Extension function that replaces sensitive patterns in log content before export.

@@ -54,7 +54,9 @@ class MainViewModel(
                         }
                         .orEmpty()
                     recentErrorsFlow.value = errors
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    android.util.Log.w("MainViewModel", "Failed to refresh recent errors: ${e.message}")
+                }
                 kotlinx.coroutines.delay(30_000L)
             }
         }

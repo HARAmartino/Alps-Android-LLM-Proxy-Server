@@ -191,6 +191,7 @@ class SystemLogger(private val context: Context) {
     }
 
     private fun nowIso(): String =
+        // java.time.Instant.now() returns UTC wall-clock time, matching the UTC-based rotation logic.
         java.time.Instant.now().toString() // e.g. 2025-05-13T18:15:22.164Z
 
     companion object {

@@ -109,8 +109,21 @@ class AccessLogger(private val context: Context) {
             }
 
             if (keepFrom >= fileLength) {
-                // Nothing to keep — clear the file.
-                logFile.writeText("")
+                // The midpoint landed at or past EOF (e.g., a single very long line).
+                // Retain the last MIN_RETAIN_BYTES to preserve recent data.
+                val retainFrom = (fileLength - MIN_RETAIN_BYTES).coerceAtLeast(0L)
+                if (retainFrom == 0L) return // file is smaller than minimum — nothing to do
+
+                val retained: ByteArray = RandomAccessFile(logFile, "r").use { raf ->
+                    raf.seek(retainFrom)
+                    val size = (fileLength - retainFrom).toInt()
+                    ByteArray(size).also { buf -> raf.readFully(buf) }
+                }
+                RandomAccessFile(logFile, "rw").use { raf ->
+                    raf.setLength(0)
+                    raf.seek(0)
+                    raf.write(retained)
+                }
                 return
             }
 
@@ -148,5 +161,11 @@ class AccessLogger(private val context: Context) {
 
         /** Maximum log file size before rotation is triggered (10 MB). */
         const val MAX_FILE_BYTES = 10L * 1024 * 1024
+
+        /**
+         * Minimum bytes to retain during rotation when the midpoint falls at EOF
+         * (e.g., when the file contains a single very long line). Defaults to 1 MB.
+         */
+        private const val MIN_RETAIN_BYTES = 1L * 1024 * 1024
     }
 }

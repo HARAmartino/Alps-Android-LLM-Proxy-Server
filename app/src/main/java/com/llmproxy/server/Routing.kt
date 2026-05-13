@@ -13,6 +13,7 @@ import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.OutgoingContent
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveChannel
@@ -26,8 +27,10 @@ import io.ktor.utils.io.cancel
 import io.ktor.utils.io.copyTo
 import io.ktor.utils.io.flush
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 
 internal fun Application.installProxyRoutes(
     config: ServerConfig,
@@ -86,28 +89,36 @@ internal fun Application.installProxyRoutes(
                     }
                 } catch (cancellation: CancellationException) {
                     upstreamBodyChannel?.cancel(cancellation)
+                    // If cancellation happens before body channel assignment, request scope cancellation closes it.
                     Logger.d("Routing", "Proxy call cancelled by client")
                     throw cancellation
                 } catch (timeout: HttpRequestTimeoutException) {
                     upstreamBodyChannel?.cancel(timeout)
                     Logger.e("Routing", "Upstream request timeout", timeout)
-                    call.respond(HttpStatusCode.GatewayTimeout, "Upstream request timeout")
+                    call.respondIfPossible(HttpStatusCode.GatewayTimeout, "Upstream request timeout")
                 } catch (timeout: SocketTimeoutException) {
                     upstreamBodyChannel?.cancel(timeout)
                     Logger.e("Routing", "Upstream socket timeout", timeout)
-                    call.respond(HttpStatusCode.GatewayTimeout, "Upstream socket timeout")
+                    call.respondIfPossible(HttpStatusCode.GatewayTimeout, "Upstream socket timeout")
                 } catch (timeout: ConnectTimeoutException) {
                     upstreamBodyChannel?.cancel(timeout)
                     Logger.e("Routing", "Upstream connect timeout", timeout)
-                    call.respond(HttpStatusCode.GatewayTimeout, "Upstream connect timeout")
+                    call.respondIfPossible(HttpStatusCode.GatewayTimeout, "Upstream connect timeout")
                 } catch (error: Exception) {
                     upstreamBodyChannel?.cancel(error)
                     Logger.e("Routing", "Proxy request failed", error)
-                    call.respond(HttpStatusCode.BadGateway, "Proxy request failed: ${error.message.orEmpty()}")
+                    call.respondIfPossible(HttpStatusCode.BadGateway, "Proxy request failed: ${error.message.orEmpty()}")
                 } finally {
                     activeConnections.update { current -> (current - 1).coerceAtLeast(0) }
                 }
             }
         }
     }
+}
+
+private suspend fun ApplicationCall.respondIfPossible(status: HttpStatusCode, message: String) {
+    if (response.isCommitted || !currentCoroutineContext().isActive) {
+        return
+    }
+    respond(status, message)
 }

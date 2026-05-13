@@ -16,6 +16,7 @@ class UpstreamHttpClientFactory {
             engine {
                 maxConnectionsCount = 128
                 endpoint {
+                    // CIO uses "per route" as host+port connection pooling scope.
                     maxConnectionsPerRoute = 10
                     connectAttempts = 2
                     keepAliveTime = 5_000

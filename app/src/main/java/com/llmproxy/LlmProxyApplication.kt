@@ -2,6 +2,7 @@ package com.llmproxy
 
 import android.app.Application
 import com.llmproxy.client.UpstreamHttpClientFactory
+import com.llmproxy.client.tunneling.NgrokRestClient
 import com.llmproxy.data.SecurePreferences
 import com.llmproxy.data.SettingsRepository
 import com.llmproxy.server.SslContextLoader
@@ -52,6 +53,10 @@ class LlmProxyApplication : Application() {
         )
     }
 
+    val ngrokRestClient: NgrokRestClient by lazy {
+        NgrokRestClient()
+    }
+
     val serverLifecycleManager: ServerLifecycleManager by lazy {
         ServerLifecycleManager(
             context = this,
@@ -59,7 +64,8 @@ class LlmProxyApplication : Application() {
             settingsRepository = settingsRepository,
             sslCertGenerator = sslCertGenerator,
             sslContextLoader = sslContextLoader,
-            upstreamClient = upstreamHttpClientFactory.create()
+            upstreamClient = upstreamHttpClientFactory.create(),
+            tunnelingClient = ngrokRestClient,
         )
     }
 

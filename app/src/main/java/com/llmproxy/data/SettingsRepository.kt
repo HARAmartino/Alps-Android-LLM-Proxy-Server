@@ -27,6 +27,8 @@ class SettingsRepository(
     private val upstreamUrlKey = stringPreferencesKey("upstream_url")
     private val listenPortKey = intPreferencesKey("listen_port")
     private val bindAddressKey = stringPreferencesKey("bind_address")
+    private val networkModeKey = stringPreferencesKey("network_mode")
+    private val tunnelPublicUrlKey = stringPreferencesKey("tunnel_public_url")
 
     val serverConfig: StateFlow<ServerConfig> = combine(
         context.dataStore.data
@@ -39,8 +41,9 @@ class SettingsRepository(
             }
             .map(::toBaseConfig),
         securePreferences.apiKeyFlow(),
-    ) { baseConfig, apiKey ->
-        baseConfig.copy(apiKey = apiKey)
+        securePreferences.tunnelAuthTokenFlow(),
+    ) { baseConfig, apiKey, tunnelAuthToken ->
+        baseConfig.copy(apiKey = apiKey, tunnelAuthToken = tunnelAuthToken)
     }.stateIn(
         scope = applicationScope,
         started = SharingStarted.Eagerly,
@@ -69,11 +72,33 @@ class SettingsRepository(
         securePreferences.setApiKey(value.trim())
     }
 
+    suspend fun updateNetworkMode(value: String) {
+        context.dataStore.edit { preferences ->
+            preferences[networkModeKey] = value
+        }
+    }
+
+    suspend fun updateTunnelAuthToken(value: String) {
+        securePreferences.setTunnelAuthToken(value.trim())
+    }
+
+    /** Persists the last known tunnel public URL so it survives app restarts. */
+    suspend fun updateTunnelPublicUrl(value: String?) {
+        context.dataStore.edit { preferences ->
+            if (value != null) {
+                preferences[tunnelPublicUrlKey] = value
+            } else {
+                preferences.remove(tunnelPublicUrlKey)
+            }
+        }
+    }
+
     private fun toBaseConfig(preferences: Preferences): ServerConfig {
         return ServerConfig(
             upstreamUrl = preferences[upstreamUrlKey].orEmpty(),
             listenPort = preferences[listenPortKey] ?: ServerConfig.DEFAULT_PORT,
             bindAddress = preferences[bindAddressKey] ?: ServerConfig.DEFAULT_BIND_ADDRESS,
+            networkMode = preferences[networkModeKey] ?: ServerConfig.NETWORK_MODE_LOCAL,
         )
     }
 }

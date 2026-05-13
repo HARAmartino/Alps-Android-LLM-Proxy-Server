@@ -121,8 +121,8 @@ class NetworkMonitor(
         var connection: HttpURLConnection? = null
         runCatching {
             connection = URL(PUBLIC_IP_ENDPOINT).openConnection() as HttpURLConnection
-            connection?.connectTimeout = 3_000
-            connection?.readTimeout = 3_000
+            connection?.connectTimeout = PUBLIC_IP_CONNECT_TIMEOUT_MS
+            connection?.readTimeout = PUBLIC_IP_READ_TIMEOUT_MS
             connection?.requestMethod = "GET"
             connection?.inputStream?.bufferedReader()?.use { reader ->
                 val response = reader.readText().trim()
@@ -135,6 +135,8 @@ class NetworkMonitor(
 
     private companion object {
         private const val PUBLIC_IP_ENDPOINT = "https://checkip.amazonaws.com"
-        private const val PUBLIC_IP_REFRESH_INTERVAL_MS = 15_000L
+        private const val PUBLIC_IP_CONNECT_TIMEOUT_MS = 3_000
+        private const val PUBLIC_IP_READ_TIMEOUT_MS = 3_000
+        private const val PUBLIC_IP_REFRESH_INTERVAL_MS = 5 * 60_000L
     }
 }

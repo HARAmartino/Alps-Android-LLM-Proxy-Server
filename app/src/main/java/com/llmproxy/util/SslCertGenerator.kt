@@ -2,6 +2,9 @@ package com.llmproxy.util
 
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import androidx.core.content.FileProvider
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.asn1.x509.BasicConstraints
@@ -23,6 +26,7 @@ import java.io.FileWriter
 import java.math.BigInteger
 import java.security.KeyPairGenerator
 import java.security.KeyStore
+import java.security.SecureRandom
 import java.security.Security
 import java.security.cert.X509Certificate
 import java.util.Date
@@ -37,19 +41,34 @@ class SslCertGenerator(
         }
     }
 
+    private val passwordPreferences: SharedPreferences by lazy {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+
+        EncryptedSharedPreferences.create(
+            context,
+            KEYSTORE_PASSWORD_FILE,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+
     @Synchronized
     fun ensureCertificateFiles(): SslMaterial {
+        val keyStorePassword = getOrCreateKeyStorePassword()
         val sslDirectory = File(context.filesDir, SSL_DIRECTORY).apply { mkdirs() }
         val certificateFile = File(sslDirectory, CERTIFICATE_FILE_NAME)
         val privateKeyFile = File(sslDirectory, PRIVATE_KEY_FILE_NAME)
         val keyStoreFile = File(sslDirectory, KEYSTORE_FILE_NAME)
 
         if (!certificateFile.exists() || !privateKeyFile.exists() || !keyStoreFile.exists()) {
-            generateCertificate(certificateFile, privateKeyFile, keyStoreFile)
+            generateCertificate(certificateFile, privateKeyFile, keyStoreFile, keyStorePassword)
         }
 
         val keyStore = KeyStore.getInstance(KEYSTORE_TYPE).apply {
-            keyStoreFile.inputStream().use { load(it, KEYSTORE_PASSWORD.toCharArray()) }
+            keyStoreFile.inputStream().use { load(it, keyStorePassword) }
         }
 
         return SslMaterial(
@@ -57,7 +76,7 @@ class SslCertGenerator(
             certificateFile = certificateFile,
             privateKeyFile = privateKeyFile,
             keyStoreFile = keyStoreFile,
-            password = KEYSTORE_PASSWORD.toCharArray(),
+            password = keyStorePassword,
         )
     }
 
@@ -87,6 +106,7 @@ class SslCertGenerator(
         certificateFile: File,
         privateKeyFile: File,
         keyStoreFile: File,
+        keyStorePassword: CharArray,
     ) {
         val keyPair = KeyPairGenerator.getInstance("RSA").apply {
             initialize(2048)
@@ -146,12 +166,24 @@ class SslCertGenerator(
 
         val keyStore = KeyStore.getInstance(KEYSTORE_TYPE).apply {
             load(null)
-            setKeyEntry(KEY_ALIAS, keyPair.private, KEYSTORE_PASSWORD.toCharArray(), arrayOf(certificate))
+            setKeyEntry(KEY_ALIAS, keyPair.private, keyStorePassword, arrayOf(certificate))
         }
 
         FileOutputStream(keyStoreFile).use { outputStream ->
-            keyStore.store(outputStream, KEYSTORE_PASSWORD.toCharArray())
+            keyStore.store(outputStream, keyStorePassword)
         }
+    }
+
+    private fun getOrCreateKeyStorePassword(): CharArray {
+        val existing = passwordPreferences.getString(KEYSTORE_PASSWORD_KEY, null)
+        if (!existing.isNullOrBlank()) {
+            return existing.toCharArray()
+        }
+
+        val randomBytes = ByteArray(32).also(SecureRandom()::nextBytes)
+        val encoded = java.util.Base64.getEncoder().encodeToString(randomBytes)
+        passwordPreferences.edit().putString(KEYSTORE_PASSWORD_KEY, encoded).apply()
+        return encoded.toCharArray()
     }
 
     data class SslMaterial(
@@ -164,11 +196,12 @@ class SslCertGenerator(
 
     companion object {
         const val KEY_ALIAS = "proxy"
-        const val KEYSTORE_PASSWORD = "changeit"
         private const val KEYSTORE_TYPE = "PKCS12"
         private const val SSL_DIRECTORY = "ssl"
         private const val CERTIFICATE_FILE_NAME = "proxy-cert.crt"
         private const val PRIVATE_KEY_FILE_NAME = "proxy-key.pem"
         private const val KEYSTORE_FILE_NAME = "proxy-keystore.p12"
+        private const val KEYSTORE_PASSWORD_FILE = "ssl_keystore_passwords"
+        private const val KEYSTORE_PASSWORD_KEY = "proxy_keystore_password"
     }
 }

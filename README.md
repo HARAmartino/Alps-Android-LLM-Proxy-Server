@@ -1,4 +1,6 @@
-# Alps-Android-LLM-Proxy-Server
+# LLM Proxy Server
+
+Repository: `HARAmartino/Alps-Android-LLM-Proxy-Server`
 
 Android 8.0+ application skeleton that turns an older phone into a local-network HTTPS proxy for upstream LLM APIs.
 

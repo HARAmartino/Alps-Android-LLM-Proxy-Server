@@ -19,7 +19,7 @@ class UpstreamHttpClientFactory {
                     connectAttempts = 2
                     keepAliveTime = 5_000
                     connectTimeout = 30_000
-                    requestTimeout = 0
+                    requestTimeout = 120_000
                     pipelineMaxSize = 20
                 }
             }

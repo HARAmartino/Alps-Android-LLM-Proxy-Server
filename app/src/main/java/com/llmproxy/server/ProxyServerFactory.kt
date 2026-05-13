@@ -33,17 +33,16 @@ class ProxyServerFactory(
         config: ServerConfig,
         activeConnections: MutableStateFlow<Int>,
     ): ApplicationEngine {
-        val (_, keyStore) = sslContextLoader.loadSslContext()
-        val keyPassword = com.llmproxy.util.SslCertGenerator.KEYSTORE_PASSWORD.toCharArray()
+        val sslMaterial = sslContextLoader.loadSslContext()
 
         return embeddedServer(
             CIO,
             environment = applicationEngineEnvironment {
                 sslConnector(
-                    keyStore = keyStore,
+                    keyStore = sslMaterial.keyStore,
                     keyAlias = com.llmproxy.util.SslCertGenerator.KEY_ALIAS,
-                    keyStorePassword = { keyPassword },
-                    privateKeyPassword = { keyPassword },
+                    keyStorePassword = { sslMaterial.keyPassword },
+                    privateKeyPassword = { sslMaterial.keyPassword },
                 ) {
                     host = config.bindAddress
                     port = config.listenPort

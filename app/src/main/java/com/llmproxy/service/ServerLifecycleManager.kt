@@ -308,7 +308,7 @@ class ServerLifecycleManager(
                         config.networkMode != ServerConfig.NETWORK_MODE_TUNNELING ||
                         lastKnownNetworkType == NetworkType.OFFLINE
                     ) {
-                        return@withLock true
+                        return@withLock false
                     }
 
                     val connected = startTunnelLocked(config)
@@ -330,7 +330,7 @@ class ServerLifecycleManager(
                         tunnelStatus = TunnelStatus.Connecting,
                         showManualTunnelReconnect = false,
                     )
-                    true
+                    return@withLock true
                 }
 
                 if (!shouldWaitAndRetry) return@launch

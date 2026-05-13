@@ -13,6 +13,10 @@ SAMPLE_INTERVAL_SEC=3600
 NONSTREAM_PATH="/v1/models"
 STREAM_PATH="/v1/chat/completions"
 STREAM_MODEL="gpt-4o-mini"
+RENEWAL_WORK_NAME="daily_certificate_renewal"
+HEAP_GROWTH_THRESHOLD_PCT=10
+CA_CERT_PATH=""
+ALLOW_INSECURE_TLS=0
 
 usage() {
   cat <<'EOF'
@@ -31,6 +35,11 @@ Options:
   --nonstream-path <value>                Non-streaming path (default: /v1/models)
   --stream-path <value>                   Streaming path (default: /v1/chat/completions)
   --stream-model <value>                  Streaming request model field (default: gpt-4o-mini)
+  --renewal-work-name <value>             WorkManager unique name (default: daily_certificate_renewal)
+  --heap-growth-threshold-pct <value>     Heap-growth alert threshold (default: 10)
+  --ca-cert <path>                        PEM certificate for TLS verification
+  --insecure                              Use curl -k (skip TLS verification)
+  --strict-tls                            Disable -k and require valid TLS chain
   -h, --help                              Show this help
 EOF
 }
@@ -48,6 +57,11 @@ while [[ $# -gt 0 ]]; do
     --nonstream-path) NONSTREAM_PATH="${2:-}"; shift 2 ;;
     --stream-path) STREAM_PATH="${2:-}"; shift 2 ;;
     --stream-model) STREAM_MODEL="${2:-}"; shift 2 ;;
+    --renewal-work-name) RENEWAL_WORK_NAME="${2:-}"; shift 2 ;;
+    --heap-growth-threshold-pct) HEAP_GROWTH_THRESHOLD_PCT="${2:-}"; shift 2 ;;
+    --ca-cert) CA_CERT_PATH="${2:-}"; shift 2 ;;
+    --insecure) ALLOW_INSECURE_TLS=1; shift ;;
+    --strict-tls) ALLOW_INSECURE_TLS=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 1 ;;
   esac
@@ -69,6 +83,16 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
+if [[ ! "$HEAP_GROWTH_THRESHOLD_PCT" =~ ^[0-9]+$ ]]; then
+  echo "Error: --heap-growth-threshold-pct must be an integer." >&2
+  exit 1
+fi
+
+if [[ ! "$STREAM_MODEL" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+  echo "Error: --stream-model contains unsupported characters." >&2
+  exit 1
+fi
+
 ADB=(adb)
 if [[ -n "$SERIAL" ]]; then
   ADB+=(-s "$SERIAL")
@@ -77,6 +101,13 @@ fi
 adb_cmd() {
   "${ADB[@]}" "$@"
 }
+
+CURL_TLS_OPTS=()
+if [[ -n "$CA_CERT_PATH" ]]; then
+  CURL_TLS_OPTS=(--cacert "$CA_CERT_PATH")
+elif (( ALLOW_INSECURE_TLS == 1 )); then
+  CURL_TLS_OPTS=(-k)
+fi
 
 RUN_TS="$(date -u +%Y%m%dT%H%M%SZ)"
 DEVICE_ID="${SERIAL:-$(adb_cmd get-serialno | tr -d '\r')}"
@@ -94,6 +125,7 @@ LEAK_LOG="$RUN_DIR/leak_scan.log"
 ALERT_LOG="$RUN_DIR/alerts.log"
 SUMMARY_MD="$RUN_DIR/summary.md"
 LOGCAT_FILE="$RUN_DIR/logcat_app.log"
+STARTED_AT_UTC="$(date -u +%FT%TZ)"
 
 echo "timestamp_utc,request_kind,url,http_code,curl_exit,latency_ms" > "$REQUEST_LOG"
 echo "timestamp_utc,total_pss_kb,java_heap_kb,native_heap_kb,pid" > "$MEM_LOG"
@@ -167,7 +199,8 @@ sample_mem_and_cpu() {
     cpu_pct="$(awk -v pid="$pid" '$1==pid {for(i=1;i<=NF;i++) if($i ~ /%/) {gsub("%","",$i); print $i; exit}}' "$cpu_raw" | tr -d '\r' || true)"
     cpu_pct="$(safe_number "${cpu_pct:-0}")"
   else
-    echo "[$ts] WARN: PID not found; app may not be running." | tee -a "$ALERT_LOG" >/dev/null
+    echo "[$ts] WARN: PID not found; app may not be running."
+    echo "$ts,WARN,PID not found; app may not be running." >> "$ALERT_LOG"
   fi
 
   echo "$ts,${pid:-0},$cpu_pct" >> "$CPU_LOG"
@@ -183,14 +216,15 @@ check_24h_heap_growth() {
   ts="$(timestamp)"
   current="$(tail -n 1 "$MEM_LOG" | cut -d',' -f2)"
   baseline="$(tail -n 25 "$MEM_LOG" | head -n 1 | cut -d',' -f2)"
-  min_window="$(tail -n 24 "$MEM_LOG" | awk -F',' 'NR==1 {min=$2} $2<min {min=$2} END {print min+0}')"
+  min_window="$(tail -n 24 "$MEM_LOG" | awk -F',' 'NR==1 {min=$2} NR>1 && $2 < min {min=$2} END {print min+0}')"
 
   current="$(safe_number "$current")"
   baseline="$(safe_number "$baseline")"
   min_window="$(safe_number "$min_window")"
 
-  if (( baseline > 0 )) && (( current * 100 > baseline * 110 )) && (( min_window >= baseline )); then
-    echo "$ts,ALERT,Heap/PSS grew >10% vs 24h baseline without recovery (baseline=${baseline}KB current=${current}KB)." >> "$ALERT_LOG"
+  if awk -v current="$current" -v baseline="$baseline" -v min_window="$min_window" -v threshold="$HEAP_GROWTH_THRESHOLD_PCT" \
+    'BEGIN { exit !(baseline > 0 && current > baseline * (1 + threshold / 100.0) && min_window >= baseline) }'; then
+    echo "$ts,ALERT,Heap/PSS grew >${HEAP_GROWTH_THRESHOLD_PCT}% vs 24h baseline without recovery (baseline=${baseline}KB current=${current}KB)." >> "$ALERT_LOG"
   fi
 }
 
@@ -203,30 +237,30 @@ leak_total_byte_read_channel=0
 network_mode="wifi"
 
 send_request() {
-  local ts url kind start_ms end_ms latency_ms http_code curl_exit body
+  local ts url kind start_s end_s latency_ms http_code curl_exit body
   ts="$(timestamp)"
 
   if (( REQUEST_COUNT % 2 == 0 )); then
     kind="non_stream"
     url="${PROXY_URL%/}${NONSTREAM_PATH}"
-    start_ms="$(date +%s%3N)"
+    start_s="$(date +%s)"
     set +e
-    http_code="$(curl -sk --connect-timeout 10 --max-time 60 -o /dev/null -w '%{http_code}' "$url")"
+    http_code="$(curl "${CURL_TLS_OPTS[@]}" --connect-timeout 10 --max-time 60 -o /dev/null -w '%{http_code}' "$url")"
     curl_exit=$?
     set -e
   else
     kind="stream"
     url="${PROXY_URL%/}${STREAM_PATH}"
     body="{\"model\":\"${STREAM_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"health-check\"}],\"stream\":true,\"max_tokens\":8}"
-    start_ms="$(date +%s%3N)"
+    start_s="$(date +%s)"
     set +e
-    http_code="$(curl -sk --connect-timeout 10 --max-time 120 -N -H 'Content-Type: application/json' -d "$body" -o /dev/null -w '%{http_code}' "$url")"
+    http_code="$(curl "${CURL_TLS_OPTS[@]}" --connect-timeout 10 --max-time 120 -N -H 'Content-Type: application/json' -d "$body" -o /dev/null -w '%{http_code}' "$url")"
     curl_exit=$?
     set -e
   fi
 
-  end_ms="$(date +%s%3N)"
-  latency_ms=$(( end_ms - start_ms ))
+  end_s="$(date +%s)"
+  latency_ms=$(( (end_s - start_s) * 1000 ))
   echo "$ts,$kind,$url,$http_code,$curl_exit,$latency_ms" >> "$REQUEST_LOG"
 
   REQUEST_COUNT=$((REQUEST_COUNT + 1))
@@ -258,7 +292,7 @@ force_renewal_check() {
   renewal_attempts=$((renewal_attempts + 1))
 
   jobs_out="$(adb_cmd shell dumpsys jobscheduler "$PACKAGE_NAME" 2>/dev/null | tr -d '\r' || true)"
-  job_id="$(printf '%s\n' "$jobs_out" | awk '/daily_certificate_renewal/{seen=1} seen && /JOB #/ {if (match($0,/\/[0-9]+/)) {print substr($0,RSTART+1,RLENGTH-1); exit}}')"
+  job_id="$(printf '%s\n' "$jobs_out" | awk -v work_name="$RENEWAL_WORK_NAME" '$0 ~ work_name {seen=1} seen && /JOB #/ {if (match($0,/\/[0-9]+/)) {print substr($0,RSTART+1,RLENGTH-1); exit}}')"
 
   if [[ -n "$job_id" ]]; then
     adb_cmd shell cmd jobscheduler run -f "$PACKAGE_NAME" "$job_id" >/dev/null 2>&1 || true
@@ -299,6 +333,12 @@ echo "[$(timestamp)] Request interval: ${REQUEST_INTERVAL_SEC}s"
 echo "[$(timestamp)] Sample interval: ${SAMPLE_INTERVAL_SEC}s"
 echo "[$(timestamp)] Network switch interval: ${NETWORK_SWITCH_INTERVAL_SEC}s"
 echo "[$(timestamp)] Renewal interval: ${RENEWAL_INTERVAL_SEC}s"
+echo "[$(timestamp)] Heap growth alert threshold: ${HEAP_GROWTH_THRESHOLD_PCT}%"
+if (( ALLOW_INSECURE_TLS == 1 )) && [[ -z "$CA_CERT_PATH" ]]; then
+  warn_ts="$(timestamp)"
+  echo "[$warn_ts] WARN: running with insecure TLS (-k). Use --ca-cert or --strict-tls for certificate validation."
+  echo "$warn_ts,WARN,curl uses -k (insecure TLS); pass --ca-cert or --strict-tls to enforce verification." >> "$ALERT_LOG"
+fi
 
 start_epoch="$(date +%s)"
 end_epoch=$(( start_epoch + DURATION_HOURS * 3600 ))
@@ -345,7 +385,7 @@ cat > "$SUMMARY_MD" <<EOF
 
 - Device: \`${DEVICE_ID}\`
 - Package: \`${PACKAGE_NAME}\`
-- Started (UTC): \`$(date -u -d "@$start_epoch" +%FT%TZ)\`
+- Started (UTC): \`${STARTED_AT_UTC}\`
 - Ended (UTC): \`$(date -u +%FT%TZ)\`
 - Duration (hours): \`${DURATION_HOURS}\`
 - Requests sent: \`${REQUEST_COUNT}\`

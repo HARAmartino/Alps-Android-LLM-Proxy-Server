@@ -109,10 +109,17 @@ hourly memory/CPU snapshots, and daily certificate-renewal checks.
 - Runtime duration: **72 hours** on physical Android 8.0 / 10 / 14 representative devices.
 - Traffic profile: **1 request every 5 minutes**, alternating non-streaming and streaming requests.
 - Network transitions: **Wi-Fi ↔ Mobile every 6 hours**.
-- Renewal checks: **forced every 24 hours** and normal auto-renew trigger validation when expiry is `<30 days`.
+- Renewal checks: **forced every 24 hours** and normal auto-renew trigger validation when expiry is `<30 days` (approximately `<720 hours`).
 - Memory alert rule: flag if heap/PSS grows by **>10% over 24h** with no recovery.
-- Zero-copy/log checks: no `"Channel closed unexpectedly"`, `"Resource leak"`, or `ByteReadChannel` leak symptoms.
+- Log-based leak detection for the zero-copy proxy path: no coroutine channel/stream leak signals such as `"Channel closed unexpectedly"`, `"Resource leak"`, or suspicious `ByteReadChannel` warnings.
 - Renewal/restart checks: restart drain window completes within **30s** (`DRAIN_CONNECTION_TIMEOUT_MS = 30_000`), no active-connection downtime.
+
+Before each run, confirm the connected device API level:
+
+```bash
+adb -s <adb-serial> shell getprop ro.build.version.release
+adb -s <adb-serial> shell getprop ro.build.version.sdk
+```
 
 ### Automated soak harness
 

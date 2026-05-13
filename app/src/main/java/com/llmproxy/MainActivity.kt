@@ -51,6 +51,8 @@ class MainActivity : ComponentActivity() {
                     )
                 )
                 is MainUiEffect.ShowMessage -> Unit
+                is MainUiEffect.ShowRenewalMessage -> Unit // handled by LlmProxyApp snackbar
+                is MainUiEffect.ShowRenewalResult -> Unit  // handled by LlmProxyApp snackbar
             }
         }.launchIn(lifecycleScope)
 

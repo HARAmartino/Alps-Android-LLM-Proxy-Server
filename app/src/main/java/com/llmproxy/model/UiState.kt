@@ -32,6 +32,12 @@ data class ServerRuntimeState(
     val certificateExpiresAt: Instant? = null,
     val acmeInProgress: Boolean = false,
     val certWarning: String? = null,
+    /** Connections that drained within the timeout window during the last graceful restart. */
+    val gracefulCloseCount: Int = 0,
+    /** Connections that were force-closed after the drain timeout during the last graceful restart. */
+    val forcedCloseCount: Int = 0,
+    /** True while the graceful restart drain window is active. */
+    val isRestartDraining: Boolean = false,
 )
 
 data class MainUiState(
@@ -55,6 +61,12 @@ data class MainUiState(
     val certWarning: String? = null,
     /** Last up-to-10 ERROR-level system log entries for the dashboard. */
     val recentErrors: List<RecentError> = emptyList(),
+    /** Connections that drained within the timeout window during the last graceful restart. */
+    val gracefulCloseCount: Int = 0,
+    /** Connections that were force-closed after the drain timeout during the last graceful restart. */
+    val forcedCloseCount: Int = 0,
+    /** True while the graceful restart drain window is active. */
+    val isRestartDraining: Boolean = false,
 )
 
 sealed interface MainUiEffect {
@@ -62,4 +74,8 @@ sealed interface MainUiEffect {
     data class ExportAccessLogs(val chooserTitle: String) : MainUiEffect
     data class ExportSystemLogs(val chooserTitle: String) : MainUiEffect
     data class ShowMessage(val message: String) : MainUiEffect
+    /** Non-blocking renewal progress message (e.g. "Renewing certificate…"). */
+    data class ShowRenewalMessage(val message: String) : MainUiEffect
+    /** Renewal outcome: success or failure. On failure, [canRetry] triggers a retry snackbar action. */
+    data class ShowRenewalResult(val message: String, val canRetry: Boolean) : MainUiEffect
 }

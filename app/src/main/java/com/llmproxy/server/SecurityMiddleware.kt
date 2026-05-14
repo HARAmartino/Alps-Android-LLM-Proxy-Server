@@ -10,7 +10,6 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.plugins.cors.routing.CORS
-import io.ktor.server.plugins.cors.routing.CORSConfig
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
 import java.net.InetAddress
@@ -157,11 +156,12 @@ internal fun Application.installCorsMiddleware(
                 runCatching {
                     val parsed = URI(origin)
                     val host = parsed.host?.takeIf { it.isNotBlank() } ?: return@runCatching
+                    val hostWithOptionalPort = if (parsed.port > 0) "$host:${parsed.port}" else host
                     val schemes = listOfNotNull(parsed.scheme?.takeIf { it.isNotBlank() })
                     if (schemes.isNotEmpty()) {
-                        allowHost(host = host, schemes = schemes)
+                        allowHost(host = hostWithOptionalPort, schemes = schemes)
                     } else {
-                        allowHost(host = host)
+                        allowHost(host = hostWithOptionalPort)
                     }
                 }.onFailure {
                     systemLogger?.warn(

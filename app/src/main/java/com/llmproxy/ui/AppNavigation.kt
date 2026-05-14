@@ -124,6 +124,9 @@ fun LlmProxyApp(
                     onWebhookForwardUrlChanged = viewModel::onWebhookForwardUrlChanged,
                     onEnableWakeLockChanged = viewModel::onEnableWakeLockChanged,
                     onEnableWifiLockChanged = viewModel::onEnableWifiLockChanged,
+                    onBearerTokenChanged = viewModel::onBearerTokenChanged,
+                    onRequireBearerAuthChanged = viewModel::onRequireBearerAuthChanged,
+                    onMaxRequestsPerMinuteChanged = viewModel::onMaxRequestsPerMinuteChanged,
                 )
             }
         }

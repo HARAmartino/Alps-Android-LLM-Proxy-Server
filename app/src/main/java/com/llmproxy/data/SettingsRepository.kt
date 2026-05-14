@@ -37,6 +37,8 @@ class SettingsRepository(
     private val letsEncryptAutoRenewKey = booleanPreferencesKey("lets_encrypt_auto_renew")
     private val enableWakeLockKey = booleanPreferencesKey("enable_wake_lock")
     private val enableWifiLockKey = booleanPreferencesKey("enable_wifi_lock")
+    private val requireBearerAuthKey = booleanPreferencesKey("require_bearer_auth")
+    private val maxRequestsPerMinuteKey = intPreferencesKey("max_requests_per_minute")
 
     val serverConfig: StateFlow<ServerConfig> = combine(
         combine(
@@ -52,11 +54,13 @@ class SettingsRepository(
             securePreferences.apiKeyFlow(),
             securePreferences.tunnelAuthTokenFlow(),
             securePreferences.cloudflareApiTokenFlow(),
-        ) { baseConfig, apiKey, tunnelAuthToken, cloudflareApiToken ->
+            securePreferences.bearerTokenFlow(),
+        ) { baseConfig, apiKey, tunnelAuthToken, cloudflareApiToken, bearerToken ->
             baseConfig.copy(
                 apiKey = apiKey,
                 tunnelAuthToken = tunnelAuthToken,
                 cloudflareApiToken = cloudflareApiToken,
+                bearerToken = bearerToken,
             )
         },
         securePreferences.webhookForwardUrlFlow(),
@@ -177,6 +181,22 @@ class SettingsRepository(
         securePreferences.setWebhookForwardUrl(value.trim())
     }
 
+    suspend fun updateBearerToken(value: String) {
+        securePreferences.setBearerToken(value.trim())
+    }
+
+    suspend fun updateRequireBearerAuth(value: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[requireBearerAuthKey] = value
+        }
+    }
+
+    suspend fun updateMaxRequestsPerMinute(value: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[maxRequestsPerMinuteKey] = value.coerceAtLeast(1)
+        }
+    }
+
     /** Persists the last known tunnel public URL so it survives app restarts. */
     suspend fun updateTunnelPublicUrl(value: String?) {
         context.dataStore.edit { preferences ->
@@ -207,15 +227,22 @@ class SettingsRepository(
     }
 
     private fun toBaseConfig(preferences: Preferences): ServerConfig {
+        val networkMode = preferences[networkModeKey] ?: ServerConfig.NETWORK_MODE_LOCAL
+        val explicitRequireBearerAuth = preferences[requireBearerAuthKey]
         return ServerConfig(
             upstreamUrl = preferences[upstreamUrlKey].orEmpty(),
             listenPort = preferences[listenPortKey] ?: ServerConfig.DEFAULT_PORT,
             bindAddress = preferences[bindAddressKey] ?: ServerConfig.DEFAULT_BIND_ADDRESS,
-            networkMode = preferences[networkModeKey] ?: ServerConfig.NETWORK_MODE_LOCAL,
+            networkMode = networkMode,
             letsEncryptDomain = preferences[letsEncryptDomainKey].orEmpty(),
             letsEncryptAutoRenew = preferences[letsEncryptAutoRenewKey] ?: false,
             enableWakeLock = preferences[enableWakeLockKey] ?: false,
             enableWifiLock = preferences[enableWifiLockKey] ?: false,
+            // Security default applies only when no explicit preference is stored yet.
+            requireBearerAuth = explicitRequireBearerAuth
+                ?: (networkMode == ServerConfig.NETWORK_MODE_TUNNELING),
+            maxRequestsPerMinute = preferences[maxRequestsPerMinuteKey]
+                ?: ServerConfig.DEFAULT_MAX_REQUESTS_PER_MINUTE,
         )
     }
 }

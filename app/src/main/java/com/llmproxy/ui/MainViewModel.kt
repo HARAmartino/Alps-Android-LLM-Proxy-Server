@@ -121,6 +121,8 @@ class MainViewModel(
                 isWakeLockActive = runtimeState.isWakeLockActive,
                 isWifiLockActive = runtimeState.isWifiLockActive,
                 totalLockActiveMs = runtimeState.totalLockActiveMs,
+                rateLimitTrackedIpCount = runtimeState.rateLimitTrackedIpCount,
+                rateLimitBlockedRequestCount = runtimeState.rateLimitBlockedRequestCount,
             )
         }.stateIn(
         scope = viewModelScope,
@@ -244,6 +246,25 @@ class MainViewModel(
     fun onWebhookForwardUrlChanged(value: String) {
         viewModelScope.launch {
             settingsRepository.updateWebhookForwardUrl(value)
+        }
+    }
+
+    fun onBearerTokenChanged(value: String) {
+        viewModelScope.launch {
+            settingsRepository.updateBearerToken(value)
+        }
+    }
+
+    fun onRequireBearerAuthChanged(value: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateRequireBearerAuth(value)
+        }
+    }
+
+    fun onMaxRequestsPerMinuteChanged(value: String) {
+        val rpm = value.toIntOrNull()?.coerceAtLeast(1) ?: return
+        viewModelScope.launch {
+            settingsRepository.updateMaxRequestsPerMinute(rpm)
         }
     }
 

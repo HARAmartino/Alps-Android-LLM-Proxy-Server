@@ -3,6 +3,7 @@ package com.llmproxy.server
 import com.llmproxy.model.ServerConfig
 import com.llmproxy.logging.AccessLogEntry
 import com.llmproxy.logging.AccessLogger
+import com.llmproxy.logging.SystemLogger
 import com.llmproxy.util.Logger
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.ConnectTimeoutException
@@ -17,8 +18,10 @@ import io.ktor.http.content.OutgoingContent
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
+import io.ktor.server.request.path
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveChannel
+import io.ktor.server.response.respondText
 import io.ktor.server.response.respond
 import io.ktor.server.routing.handle
 import io.ktor.server.routing.route
@@ -42,12 +45,26 @@ internal fun Application.installProxyRoutes(
     activeConnections: MutableStateFlow<Int>,
     upstreamClient: HttpClient,
     accessLogger: AccessLogger? = null,
+    systemLogger: SystemLogger? = null,
     loggerScope: CoroutineScope? = null,
     onRequestLatencyMeasured: (Long) -> Unit = {},
+    onRateLimitStatusChanged: (RateLimitStatus) -> Unit = {},
 ) {
+    // Middleware order matters: auth first, then rate-limit, then routing.
+    installAuthMiddleware(config = config, systemLogger = systemLogger)
+    installRateLimitMiddleware(
+        config = config,
+        accessLogger = accessLogger,
+        onStatusChanged = onRateLimitStatusChanged,
+    )
+
     routing {
         route("/{path...}") {
             handle {
+                if (call.request.path() == "/health") {
+                    call.respondText("ok")
+                    return@handle
+                }
                 val pathSegments = call.parameters.getAll("path").orEmpty()
                 val targetUrl = ProxyRequestMapper.buildUpstreamUrl(
                     baseUrl = config.upstreamUrl,

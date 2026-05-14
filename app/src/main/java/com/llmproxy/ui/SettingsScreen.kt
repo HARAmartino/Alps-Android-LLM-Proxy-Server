@@ -65,6 +65,9 @@ fun SettingsScreen(
     onWebhookForwardUrlChanged: (String) -> Unit,
     onEnableWakeLockChanged: (Boolean) -> Unit,
     onEnableWifiLockChanged: (Boolean) -> Unit,
+    onBearerTokenChanged: (String) -> Unit,
+    onRequireBearerAuthChanged: (Boolean) -> Unit,
+    onMaxRequestsPerMinuteChanged: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isTunneling = state.config.networkMode == ServerConfig.NETWORK_MODE_TUNNELING
@@ -176,6 +179,49 @@ fun SettingsScreen(
             onValueChange = onPortChanged,
             modifier = Modifier.fillMaxWidth(),
             label = { Text("Listen port") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        )
+
+        Text(text = "Security", style = MaterialTheme.typography.titleMedium)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Require Bearer Auth")
+                Text(
+                    text = if (isTunneling) {
+                        "Enabled by default in tunneling mode."
+                    } else {
+                        "Optional in local mode."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = state.config.requireBearerAuth,
+                onCheckedChange = onRequireBearerAuthChanged,
+            )
+        }
+        OutlinedTextField(
+            value = state.config.bearerToken,
+            onValueChange = onBearerTokenChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Bearer token") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                autoCorrect = false,
+            ),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        OutlinedTextField(
+            value = state.config.maxRequestsPerMinute.toString(),
+            onValueChange = onMaxRequestsPerMinuteChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Max RPM per IP") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         )

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.llmproxy.model.ServerConfig
@@ -39,6 +40,9 @@ class SettingsRepository(
     private val enableWifiLockKey = booleanPreferencesKey("enable_wifi_lock")
     private val requireBearerAuthKey = booleanPreferencesKey("require_bearer_auth")
     private val maxRequestsPerMinuteKey = intPreferencesKey("max_requests_per_minute")
+    private val corsAllowedOriginsKey = stringSetPreferencesKey("cors_allowed_origins")
+    private val enableIpWhitelistKey = booleanPreferencesKey("enable_ip_whitelist")
+    private val ipWhitelistKey = stringSetPreferencesKey("ip_whitelist")
 
     val serverConfig: StateFlow<ServerConfig> = combine(
         combine(
@@ -197,6 +201,26 @@ class SettingsRepository(
         }
     }
 
+    suspend fun updateCorsAllowedOrigins(value: List<String>) {
+        context.dataStore.edit { preferences ->
+            val sanitized = sanitizeStringList(value).toCollection(linkedSetOf())
+            preferences[corsAllowedOriginsKey] = sanitized
+        }
+    }
+
+    suspend fun updateEnableIpWhitelist(value: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[enableIpWhitelistKey] = value
+        }
+    }
+
+    suspend fun updateIpWhitelist(value: List<String>) {
+        context.dataStore.edit { preferences ->
+            val sanitized = sanitizeStringList(value).toCollection(linkedSetOf())
+            preferences[ipWhitelistKey] = sanitized
+        }
+    }
+
     /** Persists the last known tunnel public URL so it survives app restarts. */
     suspend fun updateTunnelPublicUrl(value: String?) {
         context.dataStore.edit { preferences ->
@@ -243,6 +267,17 @@ class SettingsRepository(
                 ?: (networkMode == ServerConfig.NETWORK_MODE_TUNNELING),
             maxRequestsPerMinute = preferences[maxRequestsPerMinuteKey]
                 ?: ServerConfig.DEFAULT_MAX_REQUESTS_PER_MINUTE,
+            corsAllowedOrigins = preferences[corsAllowedOriginsKey]
+                ?.let(::sanitizeStringList)
+                ?.ifEmpty { listOf(ServerConfig.DEFAULT_CORS_ALLOWED_ORIGIN) }
+                ?: listOf(ServerConfig.DEFAULT_CORS_ALLOWED_ORIGIN),
+            enableIpWhitelist = preferences[enableIpWhitelistKey] ?: false,
+            ipWhitelist = preferences[ipWhitelistKey]
+                ?.let(::sanitizeStringList)
+                ?: emptyList(),
         )
     }
+
+    private fun sanitizeStringList(values: Iterable<String>): List<String> =
+        values.map { it.trim() }.filter { it.isNotBlank() }
 }

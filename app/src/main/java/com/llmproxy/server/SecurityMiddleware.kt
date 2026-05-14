@@ -5,11 +5,15 @@ import com.llmproxy.logging.AccessLogger
 import com.llmproxy.logging.SystemLogger
 import com.llmproxy.model.ServerConfig
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
+import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
+import java.net.InetAddress
+import java.net.URI
 import java.security.MessageDigest
 import java.nio.charset.StandardCharsets
 import java.time.Instant
@@ -28,6 +32,9 @@ internal fun Application.installAuthMiddleware(
     systemLogger: SystemLogger? = null,
 ) {
     intercept(ApplicationCallPipeline.Plugins) {
+        if (call.request.isCorsPreflightRequest()) {
+            return@intercept
+        }
         if (!config.requireBearerAuth || call.request.path() == "/health") {
             return@intercept
         }
@@ -60,6 +67,9 @@ internal fun Application.installRateLimitMiddleware(
 ) {
     val limiter = IpTokenBucketLimiter()
     intercept(ApplicationCallPipeline.Plugins) {
+        if (call.request.isCorsPreflightRequest()) {
+            return@intercept
+        }
         if (call.request.path() == "/health") {
             return@intercept
         }
@@ -83,6 +93,92 @@ internal fun Application.installRateLimitMiddleware(
             call.response.headers.append(HttpHeaders.RetryAfter, decision.retryAfterSeconds.toString())
             call.respond(HttpStatusCode.TooManyRequests, "Rate limit exceeded")
             finish()
+        }
+    }
+}
+
+internal fun Application.installIpWhitelistMiddleware(
+    config: ServerConfig,
+    systemLogger: SystemLogger? = null,
+) {
+    if (!config.enableIpWhitelist) {
+        return
+    }
+    val whitelistMatchers = config.ipWhitelist
+        .mapNotNull { entry -> parseIpWhitelistEntry(entry) }
+    intercept(ApplicationCallPipeline.Plugins) {
+        if (call.request.isCorsPreflightRequest()) {
+            return@intercept
+        }
+        if (call.request.path() == "/health") {
+            return@intercept
+        }
+        // Empty whitelist keeps behavior open even when the toggle is enabled.
+        if (whitelistMatchers.isEmpty()) {
+            return@intercept
+        }
+        val clientIp = call.clientIp(config)
+        if (whitelistMatchers.any { matcher -> matcher.matches(clientIp) }) {
+            return@intercept
+        }
+        systemLogger?.warn(
+            tag = "IpWhitelistMiddleware",
+            message = "Blocked request path=${call.request.path()} ip=$clientIp",
+        )
+        call.respond(HttpStatusCode.Forbidden, "Forbidden")
+        finish()
+    }
+}
+
+internal fun Application.installCorsMiddleware(
+    config: ServerConfig,
+    systemLogger: SystemLogger? = null,
+) {
+    install(CORS) {
+        allowMethod(HttpMethod.Get)
+        allowMethod(HttpMethod.Post)
+        allowMethod(HttpMethod.Options)
+        allowHeader(HttpHeaders.ContentType)
+        allowHeader(HttpHeaders.Authorization)
+        exposeHeader(HttpHeaders.AccessControlAllowOrigin)
+        exposeHeader(HttpHeaders.AccessControlAllowMethods)
+        exposeHeader(HttpHeaders.AccessControlAllowHeaders)
+
+        val origins = config.corsAllowedOrigins
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .ifEmpty { listOf(ServerConfig.DEFAULT_CORS_ALLOWED_ORIGIN) }
+        if (origins.any { it == "*" }) {
+            anyHost()
+        } else {
+            // Each origin is expected as a full URL (scheme + host + optional port).
+            origins.forEach { origin ->
+                runCatching {
+                    val parsed = URI(origin)
+                    val host = parsed.host?.takeIf { it.isNotBlank() }
+                        ?: throw IllegalArgumentException("Missing host in origin: $origin")
+                    val hostWithOptionalPort = if (parsed.port > 0) "$host:${parsed.port}" else host
+                    val schemes = listOfNotNull(parsed.scheme?.takeIf { it.isNotBlank() })
+                    if (schemes.isNotEmpty()) {
+                        allowHost(host = hostWithOptionalPort, schemes = schemes)
+                    } else {
+                        allowHost(host = hostWithOptionalPort)
+                    }
+                }.onFailure { error ->
+                    systemLogger?.warn(
+                        tag = "CorsMiddleware",
+                        message = "Ignoring invalid CORS origin: $origin (${error.message})",
+                    )
+                }
+            }
+        }
+    }
+    intercept(ApplicationCallPipeline.Plugins) {
+        if (call.request.isCorsPreflightRequest()) {
+            systemLogger?.debug(
+                tag = "CorsMiddleware",
+                message = "CORS preflight path=${call.request.path()} origin=${call.request.headers[HttpHeaders.Origin].orEmpty()}",
+            )
         }
     }
 }
@@ -196,6 +292,83 @@ private fun io.ktor.server.application.ApplicationCall.clientIp(config: ServerCo
         return forwarded
     }
     return request.local.remoteAddress
+}
+
+private fun io.ktor.server.request.ApplicationRequest.isCorsPreflightRequest(): Boolean {
+    return httpMethod == HttpMethod.Options &&
+        !headers[HttpHeaders.Origin].isNullOrBlank() &&
+        !headers[HttpHeaders.AccessControlRequestMethod].isNullOrBlank()
+}
+
+private fun parseIpWhitelistEntry(entry: String): IpMatcher? {
+    val trimmed = entry.trim()
+    if (trimmed.isBlank()) {
+        return null
+    }
+    val cidrParts = trimmed.split("/", limit = 2)
+    return if (cidrParts.size == 2) {
+        val prefixLength = cidrParts[1].toIntOrNull() ?: return null
+        val networkBytes = runCatching { InetAddress.getByName(cidrParts[0]).address }.getOrNull() ?: return null
+        if (prefixLength !in 0..(networkBytes.size * 8)) {
+            return null
+        }
+        // Normalize host bits to zero so CIDR entries are interpreted as network ranges.
+        CidrMatcher(networkBytes = normalizeNetworkAddress(networkBytes, prefixLength), prefixLength = prefixLength)
+    } else {
+        val ipBytes = runCatching { InetAddress.getByName(trimmed).address }.getOrNull() ?: return null
+        ExactIpMatcher(ipBytes)
+    }
+}
+
+private interface IpMatcher {
+    fun matches(ip: String): Boolean
+}
+
+private class ExactIpMatcher(
+    private val ipBytes: ByteArray,
+) : IpMatcher {
+    override fun matches(ip: String): Boolean {
+        val candidate = runCatching { InetAddress.getByName(ip).address }.getOrNull() ?: return false
+        return candidate.contentEquals(ipBytes)
+    }
+}
+
+private class CidrMatcher(
+    private val networkBytes: ByteArray,
+    private val prefixLength: Int,
+) : IpMatcher {
+    override fun matches(ip: String): Boolean {
+        val candidate = runCatching { InetAddress.getByName(ip).address }.getOrNull() ?: return false
+        if (candidate.size != networkBytes.size) {
+            return false
+        }
+        val fullBytes = prefixLength / 8
+        val remainingBits = prefixLength % 8
+        for (index in 0 until fullBytes) {
+            if (candidate[index] != networkBytes[index]) {
+                return false
+            }
+        }
+        if (remainingBits == 0) {
+            return true
+        }
+        val mask = (0xFF shl (8 - remainingBits)) and 0xFF
+        return (candidate[fullBytes].toInt() and mask) == (networkBytes[fullBytes].toInt() and mask)
+    }
+}
+
+private fun normalizeNetworkAddress(networkBytes: ByteArray, prefixLength: Int): ByteArray {
+    val normalized = networkBytes.copyOf()
+    val fullBytes = prefixLength / 8
+    val remainingBits = prefixLength % 8
+    if (remainingBits != 0 && fullBytes < normalized.size) {
+        val mask = (0xFF shl (8 - remainingBits)) and 0xFF
+        normalized[fullBytes] = (normalized[fullBytes].toInt() and mask).toByte()
+    }
+    for (index in (fullBytes + if (remainingBits == 0) 0 else 1) until normalized.size) {
+        normalized[index] = 0
+    }
+    return normalized
 }
 
 private fun constantTimeTokenMatch(providedToken: String, expectedToken: String): Boolean {

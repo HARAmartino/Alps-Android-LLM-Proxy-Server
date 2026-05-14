@@ -50,13 +50,16 @@ internal fun Application.installProxyRoutes(
     onRequestLatencyMeasured: (Long) -> Unit = {},
     onRateLimitStatusChanged: (RateLimitStatus) -> Unit = {},
 ) {
-    // Middleware order matters: auth first, then rate-limit, then routing.
+    // Middleware order matters: auth -> rate-limit -> IP whitelist -> CORS -> proxy routing.
+    // Security interceptors explicitly skip CORS preflight so the CORS plugin can answer OPTIONS.
     installAuthMiddleware(config = config, systemLogger = systemLogger)
     installRateLimitMiddleware(
         config = config,
         accessLogger = accessLogger,
         onStatusChanged = onRateLimitStatusChanged,
     )
+    installIpWhitelistMiddleware(config = config, systemLogger = systemLogger)
+    installCorsMiddleware(config = config, systemLogger = systemLogger)
 
     routing {
         route("/{path...}") {

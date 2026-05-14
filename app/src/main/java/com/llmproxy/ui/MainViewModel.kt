@@ -268,6 +268,33 @@ class MainViewModel(
         }
     }
 
+    fun onCorsAllowedOriginsChanged(value: String) {
+        val origins = value
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        viewModelScope.launch {
+            settingsRepository.updateCorsAllowedOrigins(origins)
+        }
+    }
+
+    fun onEnableIpWhitelistChanged(value: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateEnableIpWhitelist(value)
+        }
+    }
+
+    fun onIpWhitelistChanged(value: String) {
+        val entries = value
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toList()
+        viewModelScope.launch {
+            settingsRepository.updateIpWhitelist(entries)
+        }
+    }
+
     fun onRequestCertificateRequested() {
         viewModelScope.launch {
             serverLifecycleManager.requestLetsEncryptCertificate()

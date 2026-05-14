@@ -64,6 +64,81 @@ app/src/main/java/com/llmproxy/
 ./gradlew assembleDebug
 ```
 
+## Release build instructions
+
+### 1. Generate a release keystore
+
+```bash
+keytool -genkeypair \
+  -keystore release.jks \
+  -alias my-release-key \
+  -keyalg RSA \
+  -keysize 2048 \
+  -validity 10000 \
+  -storepass <STORE_PASSWORD> \
+  -keypass  <KEY_PASSWORD>
+```
+
+Store `release.jks` **outside** the repository (e.g. `~/.android/release.jks`) so it is never accidentally committed.
+
+### 2. Configure keystore.properties
+
+Copy the template and fill in your values:
+
+```bash
+cp keystore.properties.template keystore.properties
+```
+
+Edit `keystore.properties` (already in `.gitignore`):
+
+```properties
+storeFile=/absolute/path/to/release.jks
+storePassword=<STORE_PASSWORD>
+keyAlias=my-release-key
+keyPassword=<KEY_PASSWORD>
+```
+
+### 3. Build a signed release APK
+
+ABI splits produce one slim APK per architecture (`armeabi-v7a` and `arm64-v8a`):
+
+```bash
+./gradlew assembleRelease
+```
+
+Output APKs are in `app/build/outputs/apk/release/`.
+
+### 4. Validate APK size (optional)
+
+The `check_apk_size.sh` script builds the release APK and fails if any per-ABI APK exceeds 25 MB:
+
+```bash
+chmod +x check_apk_size.sh
+./check_apk_size.sh
+```
+
+Override the threshold:
+
+```bash
+MAX_APK_SIZE_MB=20 ./check_apk_size.sh
+# or
+./check_apk_size.sh --max-mb 20
+```
+
+This same check runs automatically in CI (`release-size-check` workflow) on every push and pull-request targeting `main` or `develop`.
+
+### R8 / ProGuard troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `ClassNotFoundException: io.ktor.server.cio.*` at startup | R8 stripped CIO engine internals | Ensure `app/proguard-rules.pro` contains `-keep class io.ktor.server.cio.** { *; }` |
+| `ChannelClosedException` / `ByteReadChannel` errors under load | Ktor utils.io classes optimised away | Add `-keep class io.ktor.utils.io.** { *; }` |
+| Coroutine `DebugProbes` crash on release | Debug coroutines instrumentation removed | Expected; only enable `DebugProbes` in debug builds |
+| `NoSuchProviderException` for BouncyCastle | BC provider class removed | Ensure `-keep class org.bouncycastle.** { *; }` is present |
+| ACME4J `ClassNotFoundException` | Challenge handler instantiated by reflection | Ensure `-keep class org.shredzone.acme4j.** { *; }` is present |
+
+To inspect what R8 removed, check `app/build/outputs/mapping/release/mapping.txt` and `usage.txt`.
+
 ## Run instructions
 
 1. Install the debug build on an Android 8.0+ device.

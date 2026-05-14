@@ -155,7 +155,8 @@ internal fun Application.installCorsMiddleware(
             origins.forEach { origin ->
                 runCatching {
                     val parsed = URI(origin)
-                    val host = parsed.host?.takeIf { it.isNotBlank() } ?: return@runCatching
+                    val host = parsed.host?.takeIf { it.isNotBlank() }
+                        ?: throw IllegalArgumentException("Missing host in origin: $origin")
                     val hostWithOptionalPort = if (parsed.port > 0) "$host:${parsed.port}" else host
                     val schemes = listOfNotNull(parsed.scheme?.takeIf { it.isNotBlank() })
                     if (schemes.isNotEmpty()) {
@@ -311,8 +312,8 @@ private fun parseIpWhitelistEntry(entry: String): IpMatcher? {
         if (prefixLength !in 0..(networkBytes.size * 8)) {
             return null
         }
-        // CIDR match compares only the first [prefixLength] bits and ignores host bits.
-        CidrMatcher(networkBytes = networkBytes, prefixLength = prefixLength)
+        // Normalize host bits to zero so CIDR entries are interpreted as network ranges.
+        CidrMatcher(networkBytes = normalizeNetworkAddress(networkBytes, prefixLength), prefixLength = prefixLength)
     } else {
         val ipBytes = runCatching { InetAddress.getByName(trimmed).address }.getOrNull() ?: return null
         ExactIpMatcher(ipBytes)
@@ -354,6 +355,20 @@ private class CidrMatcher(
         val mask = (0xFF shl (8 - remainingBits)) and 0xFF
         return (candidate[fullBytes].toInt() and mask) == (networkBytes[fullBytes].toInt() and mask)
     }
+}
+
+private fun normalizeNetworkAddress(networkBytes: ByteArray, prefixLength: Int): ByteArray {
+    val normalized = networkBytes.copyOf()
+    val fullBytes = prefixLength / 8
+    val remainingBits = prefixLength % 8
+    if (remainingBits != 0 && fullBytes < normalized.size) {
+        val mask = (0xFF shl (8 - remainingBits)) and 0xFF
+        normalized[fullBytes] = (normalized[fullBytes].toInt() and mask).toByte()
+    }
+    for (index in (fullBytes + if (remainingBits == 0) 0 else 1) until normalized.size) {
+        normalized[index] = 0
+    }
+    return normalized
 }
 
 private fun constantTimeTokenMatch(providedToken: String, expectedToken: String): Boolean {

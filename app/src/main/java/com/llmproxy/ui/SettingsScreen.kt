@@ -229,7 +229,7 @@ fun SettingsScreen(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         )
         OutlinedTextField(
-            value = state.config.corsAllowedOrigins.joinToString(", ").ifBlank { ServerConfig.DEFAULT_CORS_ALLOWED_ORIGIN },
+            value = state.config.corsAllowedOrigins.joinToString(", "),
             onValueChange = onCorsAllowedOriginsChanged,
             modifier = Modifier.fillMaxWidth(),
             label = { Text("Allowed Origins (comma-separated)") },

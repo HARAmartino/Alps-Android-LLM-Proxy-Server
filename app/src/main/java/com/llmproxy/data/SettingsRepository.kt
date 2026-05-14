@@ -203,10 +203,7 @@ class SettingsRepository(
 
     suspend fun updateCorsAllowedOrigins(value: List<String>) {
         context.dataStore.edit { preferences ->
-            val sanitized = value
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .toSet()
+            val sanitized = sanitizeStringList(value).toSet()
             preferences[corsAllowedOriginsKey] = sanitized
         }
     }
@@ -219,10 +216,7 @@ class SettingsRepository(
 
     suspend fun updateIpWhitelist(value: List<String>) {
         context.dataStore.edit { preferences ->
-            val sanitized = value
-                .map { it.trim() }
-                .filter { it.isNotBlank() }
-                .toSet()
+            val sanitized = sanitizeStringList(value).toSet()
             preferences[ipWhitelistKey] = sanitized
         }
     }
@@ -274,17 +268,18 @@ class SettingsRepository(
             maxRequestsPerMinute = preferences[maxRequestsPerMinuteKey]
                 ?: ServerConfig.DEFAULT_MAX_REQUESTS_PER_MINUTE,
             corsAllowedOrigins = preferences[corsAllowedOriginsKey]
-                ?.map { it.trim() }
-                ?.filter { it.isNotBlank() }
+                ?.let(::sanitizeStringList)
                 ?.sorted()
                 ?.ifEmpty { listOf(ServerConfig.DEFAULT_CORS_ALLOWED_ORIGIN) }
                 ?: listOf(ServerConfig.DEFAULT_CORS_ALLOWED_ORIGIN),
             enableIpWhitelist = preferences[enableIpWhitelistKey] ?: false,
             ipWhitelist = preferences[ipWhitelistKey]
-                ?.map { it.trim() }
-                ?.filter { it.isNotBlank() }
+                ?.let(::sanitizeStringList)
                 ?.sorted()
                 ?: emptyList(),
         )
     }
+
+    private fun sanitizeStringList(values: Iterable<String>): List<String> =
+        values.map { it.trim() }.filter { it.isNotBlank() }
 }

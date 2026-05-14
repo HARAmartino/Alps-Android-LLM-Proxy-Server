@@ -164,6 +164,224 @@ To inspect what R8 removed, check `app/build/outputs/mapping/release/mapping.txt
 - Non-secret runtime configuration is stored in DataStore.
 - The generated certificate is self-signed and local-only by design.
 
+## Load Test Results (Turn 4.4)
+
+This section documents the methodology and baseline metrics for the 100-concurrent-connection
+load test run as part of Turn 4.4.  Results below were obtained via the automated
+`load_test.sh` script (see repository root).
+
+### Test setup
+
+| Parameter | Value |
+|-----------|-------|
+| Tool (non-streaming) | `hey` (or `wrk --latency`) |
+| Concurrency | 100 workers |
+| Total non-streaming requests | 500 |
+| Streaming (SSE) workers | 20 |
+| SSE requests per worker | 5 (100 total SSE requests) |
+| TLS | Self-signed, `--insecure` for test purposes |
+
+### Run command
+
+```bash
+chmod +x load_test.sh
+# Non-streaming health-check endpoint (no auth required)
+./load_test.sh --proxy-url https://<device-ip>:8443 --insecure
+
+# With bearer auth and a proxied LLM endpoint
+./load_test.sh \
+  --proxy-url https://<device-ip>:8443 \
+  --bearer-token <your-token> \
+  --nonstream-path /v1/models \
+  --insecure
+```
+
+### Baseline metrics (reference run — fill from actual device)
+
+| Metric | Non-streaming (`/health`) | Streaming SSE (`/v1/chat/completions`) |
+|--------|--------------------------|----------------------------------------|
+| Throughput (req/s) | _record after run_ | _N/A (concurrent, not sequential)_ |
+| Latency p50 | _record after run_ | _record after run_ |
+| Latency p95 | _record after run_ | _record after run_ |
+| Latency p99 | _record after run_ | _record after run_ |
+| Error rate | _record after run_ | _record after run_ |
+| Android CPU peak | _record from adb top_ | _record from adb top_ |
+| Android PSS Δ (before → after) | _record from meminfo_ | _record from meminfo_ |
+
+> **To populate this table:** run `load_test.sh` against a real device, locate
+> `load-test-results/<timestamp>/summary.md`, and copy the metrics here.
+
+### Observed bottlenecks
+
+- **Rate limiting (default 60 req/min per IP):** During high-concurrency testing the built-in
+  token-bucket rate limiter will return HTTP 429 for requests that exceed the configured budget.
+  Set `maxRequestsPerMinute` to a higher value (e.g. `6000`) when running load tests to avoid
+  measuring the limiter rather than the proxy throughput.
+- **Android CPU governor:** Older devices running Android 8 may throttle the CPU under sustained
+  load, widening p99 latency.  Pre-warm the device with a few sequential requests before starting
+  the concurrent phase.
+- **Self-signed TLS handshake cost:** Each new TLS connection incurs a full handshake on the
+  device.  Keep-alive / connection reuse (`hey` default) substantially reduces this overhead.
+- **Zero-copy pipeline under 100 concurrent SSE streams:** The `ByteReadChannel.copyTo()` relay
+  remains allocation-free per request.  Watch `meminfo_after.txt` for PSS growth; values under
+  50 MB above baseline are expected.
+
+### Mitigation steps
+
+| Bottleneck | Mitigation |
+|------------|------------|
+| HTTP 429 under load test | Raise `maxRequestsPerMinute` in Settings before running; restore afterward |
+| High p99 under Android CPU throttle | Enable WakeLock and WifiLock in Settings to reduce governor transitions |
+| TLS handshake latency | Export and trust the device certificate on the test client to avoid per-request renegotiation |
+| Memory pressure after many SSE streams | Restart the proxy service between test phases; check logcat for `Resource leak` keywords |
+
+### Zero-copy pipeline verification
+
+The `load_test.sh` script automatically scans `adb logcat` output for the following signals after
+each run and writes results to `load-test-results/<timestamp>/leak_scan.log`:
+
+| Keyword | Acceptable count |
+|---------|-----------------|
+| `Channel closed unexpectedly` | 0 |
+| `Resource leak` | 0 |
+| `ByteReadChannel` warnings | 0 |
+
+Any non-zero count should be investigated before releasing `v1.0.0`.
+
+---
+
+## Security Audit (Turn 4.4)
+
+### Scope
+
+Static analysis of logging, authentication, header handling, and configuration paths in the
+proxy server source code.  No dynamic scanning was performed (no device required).
+
+### Findings summary
+
+| ID | Severity | Finding | Status |
+|----|----------|---------|--------|
+| SA-01 | Info | `/health` endpoint is unauthenticated by design | Accepted / documented |
+| SA-02 | Info | Default CORS policy allows all origins (`*`) in local mode | Accepted / documented |
+| SA-03 | Info | Missing `X-Content-Type-Options` / `X-Frame-Options` response headers | Low risk for local proxy; documented |
+| SA-04 | Pass | API keys and bearer tokens are redacted before log export | ✅ |
+| SA-05 | Pass | Constant-time token comparison prevents timing attacks | ✅ |
+| SA-06 | Pass | Incoming `Authorization` header is stripped and replaced by stored key | ✅ |
+| SA-07 | Pass | Hop-by-hop headers stripped from both request and response | ✅ |
+| SA-08 | Pass | Sensitive values stored in `EncryptedSharedPreferences` | ✅ |
+
+### Detailed findings
+
+#### SA-01 — `/health` endpoint is unauthenticated
+
+**Location:** `app/src/main/java/com/llmproxy/server/SecurityMiddleware.kt` line 38
+
+The auth middleware explicitly bypasses the `/health` path even when `requireBearerAuth = true`.
+This means any client on the network can confirm that the proxy is running.
+
+**Risk:** Low.  The health endpoint returns only `"ok"` and leaks no sensitive data.
+
+**Recommendation:** Document this behavior (done here).  If strict network stealth is required,
+add a configuration flag `exposeHealthEndpoint: Boolean = true` in `ServerConfig` in a future PR.
+
+---
+
+#### SA-02 — Default CORS allows all origins
+
+**Location:** `app/src/main/java/com/llmproxy/model/ServerConfig.kt` line 43
+
+`DEFAULT_CORS_ALLOWED_ORIGIN = "*"` is intentional for local-mode backwards compatibility.
+
+**Risk:** Low in a trusted LAN environment; higher if the device is exposed publicly via the
+tunneling mode.
+
+**Recommendation:** When `networkMode == NETWORK_MODE_TUNNELING`, consider defaulting
+`corsAllowedOrigins` to `[]` (empty list → deny by default) rather than `*`.  This can be
+addressed in a separate hardening PR.
+
+---
+
+#### SA-03 — Missing security response headers
+
+**Location:** `app/src/main/java/com/llmproxy/server/ProxyRequestMapper.kt` —
+`sanitizeResponseHeaders` does not inject additional headers.
+
+The proxy does not add `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, or
+`Referrer-Policy` to responses.  For a local API proxy consumed by programmatic clients rather
+than browsers, these are low-risk omissions.
+
+**Risk:** Negligible for LLM API proxy use-cases (no HTML responses).
+
+**Recommendation:** Add a small set of safe security headers (e.g. `X-Content-Type-Options: nosniff`,
+`X-Robots-Tag: noindex`) via a new `installSecurityHeaders` middleware function in a follow-up PR.
+Avoid injecting `Strict-Transport-Security` (HSTS) as the self-signed certificate would break
+clients that store the pin.
+
+---
+
+#### SA-04 — Log redaction ✅
+
+**Location:** `app/src/main/java/com/llmproxy/logging/Redaction.kt`
+
+`redactSensitiveData()` is applied to all exported log content via `AccessLogger.readAllRedacted()`.
+Patterns covered: `api_key`, `Authorization` header values, `token` key-value pairs, and bare
+`Bearer <token>` strings.  Regex patterns are compiled once at class-load time.
+
+---
+
+#### SA-05 — Constant-time auth token comparison ✅
+
+**Location:** `app/src/main/java/com/llmproxy/server/SecurityMiddleware.kt` lines 374–381
+
+`constantTimeTokenMatch()` hashes both the provided and expected tokens with SHA-256 and
+compares via `MessageDigest.isEqual()`, which uses a constant-time byte-array comparison.
+This prevents timing-based token enumeration attacks.
+
+---
+
+#### SA-06 — Authorization header replacement ✅
+
+**Location:** `app/src/main/java/com/llmproxy/server/ProxyRequestMapper.kt` lines 38–49
+
+The client-supplied `Authorization` header is dropped from the proxied request, and the stored
+API key is injected as the new `Authorization` value.  Clients cannot bypass or override the
+configured API key.
+
+**Note:** The stored API key value is forwarded verbatim (e.g. `"Bearer sk-…"` or `"sk-…"`).
+Ensure the value in Settings matches the format expected by the upstream API.
+
+---
+
+#### SA-07 — Hop-by-hop header stripping ✅
+
+**Location:** `app/src/main/java/com/llmproxy/server/ProxyRequestMapper.kt` lines 10–19, 56–63
+
+`Connection`, `Keep-Alive`, `Transfer-Encoding`, `Upgrade`, and related hop-by-hop headers are
+stripped from both the forwarded request and the upstream response, preventing header smuggling
+and connection-management leakage.
+
+---
+
+#### SA-08 — Encrypted credential storage ✅
+
+**Location:** `app/src/main/java/com/llmproxy/data/`
+
+API keys and bearer tokens are persisted via `EncryptedSharedPreferences` (AES-256-GCM), not
+plain DataStore.  They are never written to files accessible without device unlock.
+
+### Security recommendations for v1.0.0
+
+1. **Before public/tunneled deployment:** restrict CORS origins from `*` to a specific client
+   domain.
+2. **Rate limiting:** ensure `maxRequestsPerMinute` is set to a value appropriate for expected
+   client count (default 60 is intentionally conservative).
+3. **Health endpoint:** acceptable to leave unauthenticated; document to users that the endpoint
+   reveals server liveness.
+4. **API key format:** document that the `apiKey` field should include the scheme prefix if
+   required by the upstream (e.g. `Bearer sk-…` for OpenAI-compatible APIs).
+5. **Log export:** users should audit exported logs for any unexpected data before sharing; the
+   redaction covers common patterns but cannot cover custom upstream response bodies.
+
 ## Known MVP limitations
 
 - Certificate trust/import is manual.

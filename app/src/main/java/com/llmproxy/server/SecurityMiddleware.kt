@@ -164,10 +164,10 @@ internal fun Application.installCorsMiddleware(
                     } else {
                         allowHost(host = hostWithOptionalPort)
                     }
-                }.onFailure {
+                }.onFailure { error ->
                     systemLogger?.warn(
                         tag = "CorsMiddleware",
-                        message = "Ignoring invalid CORS origin: $origin",
+                        message = "Ignoring invalid CORS origin: $origin (${error.message})",
                     )
                 }
             }

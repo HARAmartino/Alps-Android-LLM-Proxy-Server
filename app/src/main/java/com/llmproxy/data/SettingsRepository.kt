@@ -203,7 +203,7 @@ class SettingsRepository(
 
     suspend fun updateCorsAllowedOrigins(value: List<String>) {
         context.dataStore.edit { preferences ->
-            val sanitized = sanitizeStringList(value).toSet()
+            val sanitized = sanitizeStringList(value).toCollection(linkedSetOf())
             preferences[corsAllowedOriginsKey] = sanitized
         }
     }
@@ -216,7 +216,7 @@ class SettingsRepository(
 
     suspend fun updateIpWhitelist(value: List<String>) {
         context.dataStore.edit { preferences ->
-            val sanitized = sanitizeStringList(value).toSet()
+            val sanitized = sanitizeStringList(value).toCollection(linkedSetOf())
             preferences[ipWhitelistKey] = sanitized
         }
     }
@@ -269,13 +269,11 @@ class SettingsRepository(
                 ?: ServerConfig.DEFAULT_MAX_REQUESTS_PER_MINUTE,
             corsAllowedOrigins = preferences[corsAllowedOriginsKey]
                 ?.let(::sanitizeStringList)
-                ?.sorted()
                 ?.ifEmpty { listOf(ServerConfig.DEFAULT_CORS_ALLOWED_ORIGIN) }
                 ?: listOf(ServerConfig.DEFAULT_CORS_ALLOWED_ORIGIN),
             enableIpWhitelist = preferences[enableIpWhitelistKey] ?: false,
             ipWhitelist = preferences[ipWhitelistKey]
                 ?.let(::sanitizeStringList)
-                ?.sorted()
                 ?: emptyList(),
         )
     }

@@ -1,0 +1,50 @@
+name: Release APK Size Check
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main", "develop" ]
+
+permissions:
+  contents: read
+
+# Gatekeeper: fail the PR if any per-ABI release APK exceeds 25 MB.
+# Runs as a separate job so it does not block debug-only CI paths.
+
+jobs:
+  apk-size:
+    name: Build release APKs & validate size ≤ 25 MB
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for Gradle wrapper
+        run: chmod +x gradlew
+
+      # Build unsigned release APKs (no keystore.properties needed for size check).
+      # ABI splits produce one APK per architecture; the script checks each one.
+      - name: Build release APKs (unsigned)
+        run: ./gradlew assembleRelease --no-daemon --console=plain
+
+      - name: Check APK sizes
+        run: |
+          chmod +x check_apk_size.sh
+          ./check_apk_size.sh
+
+      - name: Upload release APKs as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apks
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 7

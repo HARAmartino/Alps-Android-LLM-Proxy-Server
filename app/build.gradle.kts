@@ -1,6 +1,17 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// ---------------------------------------------------------------------------
+// Signing: read credentials from keystore.properties (never committed to git).
+// Fall back to no-op so that debug and CI unsigned builds still assemble.
+// ---------------------------------------------------------------------------
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().also { props ->
+    if (keystorePropsFile.exists()) props.load(keystorePropsFile.inputStream())
 }
 
 android {
@@ -15,8 +26,25 @@ android {
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        // Ship only English strings plus any explicitly added locale.
+        // Drops all bundled library locales (Ktor, BouncyCastle, etc.) from the APK.
+        resourceConfigurations += listOf("en")
+    }
+
+    // ---------------------------------------------------------------------------
+    // Signing configurations
+    // ---------------------------------------------------------------------------
+    signingConfigs {
+        // debug uses the default SDK debug keystore automatically; no changes needed.
+        create("release") {
+            if (keystorePropsFile.exists()) {
+                storeFile     = file(keystoreProps["storeFile"]     as String)
+                storePassword =      keystoreProps["storePassword"] as String
+                keyAlias      =      keystoreProps["keyAlias"]      as String
+                keyPassword   =      keystoreProps["keyPassword"]   as String
+            }
+            // When keystore.properties is absent (e.g. CI unsigned checks) the
+            // release build type still assembles but produces an unsigned APK.
         }
     }
 
@@ -25,12 +53,28 @@ android {
             isMinifyEnabled = false
         }
         release {
+            // R8 full mode: tree-shake + obfuscate + resource shrink.
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // ABI splits – produce one slim APK per architecture instead of a fat APK.
+    // armeabi-v7a  : 32-bit ARM (older phones, ~90 % of Android 8 devices)
+    // arm64-v8a    : 64-bit ARM (modern phones, required for Play Store 64-bit rule)
+    // ---------------------------------------------------------------------------
+    splits {
+        abi {
+            isEnable = true
+            reset()                              // clear defaults (removes x86/x86_64)
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = false               // do not also emit a fat APK
         }
     }
 

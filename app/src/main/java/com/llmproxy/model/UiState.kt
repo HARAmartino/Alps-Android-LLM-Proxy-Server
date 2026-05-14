@@ -44,6 +44,10 @@ data class ServerRuntimeState(
     val isWifiLockActive: Boolean = false,
     /** Total elapsed time where at least one power lock has been active. */
     val totalLockActiveMs: Long = 0L,
+    /** Number of currently tracked client IPs in the token-bucket limiter. */
+    val rateLimitTrackedIpCount: Int = 0,
+    /** Total requests blocked by rate limiting since last server start. */
+    val rateLimitBlockedRequestCount: Long = 0L,
 )
 
 data class MainUiState(
@@ -78,6 +82,8 @@ data class MainUiState(
     val isWakeLockActive: Boolean = false,
     val isWifiLockActive: Boolean = false,
     val totalLockActiveMs: Long = 0L,
+    val rateLimitTrackedIpCount: Int = 0,
+    val rateLimitBlockedRequestCount: Long = 0L,
 )
 
 sealed interface MainUiEffect {

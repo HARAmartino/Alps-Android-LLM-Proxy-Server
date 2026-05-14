@@ -14,6 +14,9 @@ data class ServerConfig(
     val webhookForwardUrl: String = "",
     val enableWakeLock: Boolean = false,
     val enableWifiLock: Boolean = false,
+    val bearerToken: String = "",
+    val requireBearerAuth: Boolean = false,
+    val maxRequestsPerMinute: Int = DEFAULT_MAX_REQUESTS_PER_MINUTE,
 ) {
     val isReady: Boolean = upstreamUrl.isNotBlank() && apiKey.isNotBlank()
 
@@ -29,5 +32,8 @@ data class ServerConfig(
 
         /** Loopback address used when tunneling so the server is not exposed directly. */
         const val TUNNELING_BIND_ADDRESS = "127.0.0.1"
+
+        /** Default per-IP request budget for token-bucket rate limiting. */
+        const val DEFAULT_MAX_REQUESTS_PER_MINUTE = 60
     }
 }

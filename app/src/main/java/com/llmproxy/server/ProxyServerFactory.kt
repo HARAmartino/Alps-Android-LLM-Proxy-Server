@@ -1,6 +1,7 @@
 package com.llmproxy.server
 
 import com.llmproxy.logging.AccessLogger
+import com.llmproxy.logging.SystemLogger
 import com.llmproxy.model.ServerConfig
 import io.ktor.client.HttpClient
 import io.ktor.server.application.Application
@@ -16,12 +17,14 @@ class ProxyServerFactory(
     private val upstreamClient: HttpClient,
     private val sslContextLoader: SslContextLoader,
     private val accessLogger: AccessLogger? = null,
+    private val systemLogger: SystemLogger? = null,
     private val loggerScope: CoroutineScope? = null,
 ) {
     fun create(
         config: ServerConfig,
         activeConnections: MutableStateFlow<Int>,
         onRequestLatencyMeasured: (Long) -> Unit = {},
+        onRateLimitStatusChanged: (RateLimitStatus) -> Unit = {},
     ): ApplicationEngine {
         val sslMaterial = sslContextLoader.loadSslContext()
 
@@ -44,8 +47,10 @@ class ProxyServerFactory(
                         activeConnections = activeConnections,
                         upstreamClient = upstreamClient,
                         accessLogger = accessLogger,
+                        systemLogger = systemLogger,
                         loggerScope = loggerScope,
                         onRequestLatencyMeasured = onRequestLatencyMeasured,
+                        onRateLimitStatusChanged = onRateLimitStatusChanged,
                     )
                 }
             },

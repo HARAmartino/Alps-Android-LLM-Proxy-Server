@@ -92,6 +92,10 @@ fun MainDashboard(
                     Text(text = "Network: ${state.networkType.name}")
                     Text(text = "Public IP: ${state.publicIp ?: "Unavailable"}")
                     Text(text = "Active connections: ${state.activeConnections}")
+                    Text(
+                        text = "Rate limit: ${state.config.maxRequestsPerMinute} RPM/IP " +
+                            "(tracked IPs: ${state.rateLimitTrackedIpCount}, blocked: ${state.rateLimitBlockedRequestCount})"
+                    )
                     Text(text = "Latency p95: ${state.latencyP95Ms?.let { "${it}ms" } ?: "N/A"}")
                     Text(text = "Latency p99: ${state.latencyP99Ms?.let { "${it}ms" } ?: "N/A"}")
                     if (state.isWakeLockActive || state.isWifiLockActive) {

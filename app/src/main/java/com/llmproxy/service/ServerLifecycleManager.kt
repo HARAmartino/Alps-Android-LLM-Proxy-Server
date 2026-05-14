@@ -18,6 +18,7 @@ import com.llmproxy.model.ServerRuntimeState
 import com.llmproxy.model.ServerStatus
 import com.llmproxy.model.TunnelStatus
 import com.llmproxy.server.ProxyServerFactory
+import com.llmproxy.server.RateLimitStatus
 import com.llmproxy.server.SslContextLoader
 import com.llmproxy.util.Logger
 import com.llmproxy.util.NetworkUtils
@@ -61,6 +62,7 @@ class ServerLifecycleManager(
 ) {
     private val lifecycleMutex = Mutex()
     private val activeConnections = MutableStateFlow(0)
+    private val rateLimitStatus = MutableStateFlow(RateLimitStatus())
     private val _runtimeState = MutableStateFlow(ServerRuntimeState())
     val runtimeState: StateFlow<ServerRuntimeState> = _runtimeState.asStateFlow()
 
@@ -101,6 +103,7 @@ class ServerLifecycleManager(
             upstreamClient = upstreamClient,
             sslContextLoader = sslContextLoader,
             accessLogger = accessLogger,
+            systemLogger = systemLogger,
             loggerScope = applicationScope,
         )
     }
@@ -112,6 +115,16 @@ class ServerLifecycleManager(
         applicationScope.launch {
             activeConnections.collect { count ->
                 _runtimeState.update { it.copy(activeConnections = count) }
+            }
+        }
+        applicationScope.launch {
+            rateLimitStatus.collect { status ->
+                _runtimeState.update {
+                    it.copy(
+                        rateLimitTrackedIpCount = status.trackedIpCount,
+                        rateLimitBlockedRequestCount = status.blockedRequestCount,
+                    )
+                }
             }
         }
         networkMonitor?.let { monitor ->
@@ -228,6 +241,7 @@ class ServerLifecycleManager(
             serverEngine = null
             releaseAllPowerLocksLocked()
             activeConnections.value = 0
+            rateLimitStatus.value = RateLimitStatus()
             // Cancel any queued renewal work to prevent a duplicate renewal attempt after shutdown.
             WorkManager.getInstance(context).cancelUniqueWork(CertificateRenewalWorker.UNIQUE_WORK_NAME)
             _runtimeState.value = _runtimeState.value.copy(
@@ -761,6 +775,7 @@ class ServerLifecycleManager(
             config = effectiveConfig,
             activeConnections = activeConnections,
             onRequestLatencyMeasured = ::recordLatencySample,
+            onRateLimitStatusChanged = { status -> rateLimitStatus.value = status },
         ).also { engine -> engine.start(wait = false) }
         _runtimeState.value = _runtimeState.value.copy(
             status = ServerStatus.Running,

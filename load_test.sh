@@ -376,8 +376,9 @@ THROUGHPUT="n/a"; P95="n/a"; P99="n/a"; ERROR_RATE="n/a"
 if [[ -f "$NONSTREAM_REPORT" ]] && (( NONSTREAM_OK == 1 )); then
   if (( USE_WRK == 1 )); then
     THROUGHPUT="$(grep -i "Requests/sec" "$NONSTREAM_REPORT" 2>/dev/null | awk '{print $2}' | head -1 || echo "n/a")"
-    P95="$(grep -i "99%" "$NONSTREAM_REPORT" 2>/dev/null | awk '{print $2}' | head -1 || echo "n/a") (from wrk 99th percentile)"
-    P99="n/a (use --latency flag with wrk for percentiles)"
+    # wrk outputs percentile data only when run with --latency; parse if present.
+    P95="$(awk '/95%/{print $2; exit}' "$NONSTREAM_REPORT" 2>/dev/null || echo "n/a")"
+    P99="$(awk '/99%/{print $2; exit}' "$NONSTREAM_REPORT" 2>/dev/null || echo "n/a (pass --latency to wrk for percentile output)")"
   else
     THROUGHPUT="$(grep -i "Requests/sec" "$NONSTREAM_REPORT" 2>/dev/null | awk '{print $NF}' | head -1 || echo "n/a")"
     P95="$(awk '/95%/{print $2; exit}' "$NONSTREAM_REPORT" 2>/dev/null || echo "n/a")"

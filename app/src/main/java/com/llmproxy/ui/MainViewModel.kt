@@ -262,7 +262,7 @@ class MainViewModel(
     }
 
     fun onMaxRequestsPerMinuteChanged(value: String) {
-        val rpm = value.toIntOrNull() ?: return
+        val rpm = value.toIntOrNull()?.coerceAtLeast(1) ?: return
         viewModelScope.launch {
             settingsRepository.updateMaxRequestsPerMinute(rpm)
         }

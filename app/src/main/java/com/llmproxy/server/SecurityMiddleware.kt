@@ -11,6 +11,7 @@ import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.request.path
 import io.ktor.server.response.respond
 import java.security.MessageDigest
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -38,13 +39,12 @@ internal fun Application.installAuthMiddleware(
             .orEmpty()
 
         val expectedToken = config.bearerToken
-        val isValid = expectedToken.isNotBlank() &&
-            MessageDigest.isEqual(providedToken.toByteArray(), expectedToken.toByteArray())
+        val isValid = constantTimeTokenMatch(providedToken, expectedToken)
 
         if (!isValid) {
             systemLogger?.warn(
                 tag = "AuthMiddleware",
-                message = "Unauthorized request rejected path=${call.request.path()} ip=${call.clientIp()}",
+                message = "Unauthorized request rejected path=${call.request.path()} ip=${call.clientIp(config)}",
             )
             call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
             call.respond(HttpStatusCode.Unauthorized, "Unauthorized")
@@ -65,7 +65,7 @@ internal fun Application.installRateLimitMiddleware(
         }
 
         val rpm = config.maxRequestsPerMinute.coerceAtLeast(1)
-        val clientIp = call.clientIp()
+        val clientIp = call.clientIp(config)
         val decision = limiter.tryConsume(clientIp, rpm)
         onStatusChanged(decision.status)
 
@@ -97,32 +97,37 @@ private class IpTokenBucketLimiter {
     private val blockedCount = AtomicLong(0L)
     private val buckets = ConcurrentHashMap<String, Bucket>()
 
-    fun tryConsume(ip: String, requestsPerMinute: Int, nowMs: Long = System.currentTimeMillis()): Decision {
+    fun tryConsume(ip: String, requestsPerMinute: Int, currentTimeMs: Long = System.currentTimeMillis()): Decision {
         val rpm = requestsPerMinute.coerceAtLeast(1)
         val capacity = rpm.toDouble()
         val refillPerMs = capacity / 60_000.0
-        var retryAfterSeconds = 0L
-
-        buckets.compute(ip) { _, existing ->
-            val bucket = existing ?: Bucket(tokens = capacity, lastRefillAtMs = nowMs)
-            val elapsedMs = (nowMs - bucket.lastRefillAtMs).coerceAtLeast(0L)
+        val bucket = getOrCreateBucket(ip, capacity, currentTimeMs)
+        val retryAfterSeconds = synchronized(bucket.lock) {
+            if (currentTimeMs < bucket.lastRefillAtMs) {
+                // Recover from wall-clock rollback to avoid freezing token refills.
+                bucket.lastRefillAtMs = currentTimeMs
+            }
+            val elapsedMs = (currentTimeMs - bucket.lastRefillAtMs).coerceAtLeast(0L)
             if (elapsedMs > 0L) {
                 // Refill lazily on each request so no background timer is needed.
                 bucket.tokens = min(capacity, bucket.tokens + (elapsedMs * refillPerMs))
-                bucket.lastRefillAtMs = nowMs
+                bucket.lastRefillAtMs = currentTimeMs
             }
 
             if (bucket.tokens >= 1.0) {
                 bucket.tokens -= 1.0
+                0L
             } else {
                 val missingTokens = 1.0 - bucket.tokens
-                retryAfterSeconds = ceil(missingTokens / refillPerMs).toLong().coerceAtLeast(1L)
-                blockedCount.incrementAndGet()
+                val retryAfterMs = ceil(missingTokens / refillPerMs).toLong().coerceAtLeast(1L)
+                ceil(retryAfterMs / 1_000.0).toLong().coerceAtLeast(1L)
             }
-            bucket
         }
 
-        maybeCleanup(nowMs)
+        if (retryAfterSeconds > 0L) {
+            blockedCount.incrementAndGet()
+        }
+        maybeCleanup(currentTimeMs)
         val blocked = blockedCount.get()
         val status = RateLimitStatus(
             trackedIpCount = buckets.size,
@@ -131,20 +136,41 @@ private class IpTokenBucketLimiter {
         return Decision(allowed = retryAfterSeconds == 0L, retryAfterSeconds = retryAfterSeconds, status = status)
     }
 
-    private fun maybeCleanup(nowMs: Long) {
+    private fun getOrCreateBucket(ip: String, capacity: Double, currentTimeMs: Long): Bucket {
+        buckets[ip]?.let { return it }
+        val newBucket = Bucket(tokens = capacity, lastRefillAtMs = currentTimeMs)
+        val existing = buckets.putIfAbsent(ip, newBucket)
+        return existing ?: newBucket
+    }
+
+    private fun maybeCleanup(currentTimeMs: Long) {
         if (buckets.size <= MAX_TRACKED_IPS) return
-        val iterator = buckets.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
-            if (nowMs - entry.value.lastRefillAtMs > STALE_BUCKET_MS) {
-                iterator.remove()
+        val staleIps = buckets.entries
+            .asSequence()
+            .filter { (_, bucket) -> currentTimeMs - bucket.lastRefillAtMs > STALE_BUCKET_MS }
+            .map { (ip, _) -> ip }
+            .toList()
+        staleIps.forEach { ip ->
+            buckets.remove(ip)
+        }
+        val overflow = buckets.size - MAX_TRACKED_IPS
+        if (overflow > 0) {
+            val evictionTargets = buckets.entries
+                .asSequence()
+                .sortedBy { (_, bucket) -> bucket.lastRefillAtMs }
+                .take(overflow)
+                .map { (ip, _) -> ip }
+                .toList()
+            evictionTargets.forEach { ip ->
+                buckets.remove(ip)
             }
         }
     }
 
-    private data class Bucket(
+    private class Bucket(
         var tokens: Double,
         var lastRefillAtMs: Long,
+        val lock: Any = Any(),
     )
 
     data class Decision(
@@ -159,14 +185,24 @@ private class IpTokenBucketLimiter {
     }
 }
 
-private fun io.ktor.server.application.ApplicationCall.clientIp(): String {
+private fun io.ktor.server.application.ApplicationCall.clientIp(config: ServerConfig): String {
+    val trustForwardedHeader = config.networkMode == ServerConfig.NETWORK_MODE_TUNNELING
     val forwarded = request.headers["X-Forwarded-For"]
         ?.split(",")
         ?.firstOrNull()
         ?.trim()
         .orEmpty()
-    if (forwarded.isNotBlank()) {
+    if (trustForwardedHeader && forwarded.isNotBlank()) {
         return forwarded
     }
     return request.local.remoteAddress
+}
+
+private fun constantTimeTokenMatch(providedToken: String, expectedToken: String): Boolean {
+    val digest = MessageDigest.getInstance("SHA-256")
+    val providedHash = digest.digest(providedToken.toByteArray(StandardCharsets.UTF_8))
+    val expectedHash = digest.digest(expectedToken.toByteArray(StandardCharsets.UTF_8))
+    val configuredMask = if (expectedToken.isNotBlank()) 1 else 0
+    val matchMask = if (MessageDigest.isEqual(providedHash, expectedHash)) 1 else 0
+    return (configuredMask and matchMask) == 1
 }

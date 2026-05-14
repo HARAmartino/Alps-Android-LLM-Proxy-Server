@@ -23,7 +23,6 @@ import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveChannel
 import io.ktor.server.response.respondText
 import io.ktor.server.response.respond
-import io.ktor.server.routing.get
 import io.ktor.server.routing.handle
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
@@ -60,10 +59,6 @@ internal fun Application.installProxyRoutes(
     )
 
     routing {
-        get("/health") {
-            call.respondText("ok")
-        }
-
         route("/{path...}") {
             handle {
                 if (call.request.path() == "/health") {

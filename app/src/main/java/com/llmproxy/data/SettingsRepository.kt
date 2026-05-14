@@ -238,6 +238,7 @@ class SettingsRepository(
             letsEncryptAutoRenew = preferences[letsEncryptAutoRenewKey] ?: false,
             enableWakeLock = preferences[enableWakeLockKey] ?: false,
             enableWifiLock = preferences[enableWifiLockKey] ?: false,
+            // Security default applies only when no explicit preference is stored yet.
             requireBearerAuth = explicitRequireBearerAuth
                 ?: (networkMode == ServerConfig.NETWORK_MODE_TUNNELING),
             maxRequestsPerMinute = preferences[maxRequestsPerMinuteKey]

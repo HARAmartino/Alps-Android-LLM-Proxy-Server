@@ -211,6 +211,10 @@ fun SettingsScreen(
             modifier = Modifier.fillMaxWidth(),
             label = { Text("Bearer token") },
             singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                autoCorrect = false,
+            ),
             visualTransformation = PasswordVisualTransformation(),
         )
         OutlinedTextField(

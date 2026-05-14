@@ -68,6 +68,9 @@ fun SettingsScreen(
     onBearerTokenChanged: (String) -> Unit,
     onRequireBearerAuthChanged: (Boolean) -> Unit,
     onMaxRequestsPerMinuteChanged: (String) -> Unit,
+    onCorsAllowedOriginsChanged: (String) -> Unit,
+    onEnableIpWhitelistChanged: (Boolean) -> Unit,
+    onIpWhitelistChanged: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isTunneling = state.config.networkMode == ServerConfig.NETWORK_MODE_TUNNELING
@@ -224,6 +227,40 @@ fun SettingsScreen(
             label = { Text("Max RPM per IP") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        )
+        OutlinedTextField(
+            value = state.config.corsAllowedOrigins.joinToString(", ").ifBlank { ServerConfig.DEFAULT_CORS_ALLOWED_ORIGIN },
+            onValueChange = onCorsAllowedOriginsChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Allowed Origins (comma-separated)") },
+            singleLine = true,
+            placeholder = { Text("*, https://my-app.com") },
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Enable IP Whitelist")
+                Text(
+                    text = "When enabled, only listed IPs/CIDRs can access the proxy.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = state.config.enableIpWhitelist,
+                onCheckedChange = onEnableIpWhitelistChanged,
+            )
+        }
+        OutlinedTextField(
+            value = state.config.ipWhitelist.joinToString("\n"),
+            onValueChange = onIpWhitelistChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("IP Whitelist (one per line)") },
+            placeholder = { Text("192.168.1.0/24\n10.0.0.5") },
+            minLines = 3,
+            maxLines = 6,
         )
 
         // Network mode selector: "local" uses 0.0.0.0, "tunneling" binds to 127.0.0.1 + ngrok.

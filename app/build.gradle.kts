@@ -89,6 +89,7 @@ dependencies {
     implementation("io.ktor:ktor-server-core:2.3.12")
     implementation("io.ktor:ktor-server-cio:2.3.12")
     implementation("io.ktor:ktor-server-call-logging:2.3.12")
+    implementation("io.ktor:ktor-server-cors:2.3.12")
     implementation("io.ktor:ktor-client-core:2.3.12")
     implementation("io.ktor:ktor-client-cio:2.3.12")
     implementation("io.ktor:ktor-client-content-negotiation:2.3.12")

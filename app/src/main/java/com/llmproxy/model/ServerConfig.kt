@@ -17,6 +17,9 @@ data class ServerConfig(
     val bearerToken: String = "",
     val requireBearerAuth: Boolean = false,
     val maxRequestsPerMinute: Int = DEFAULT_MAX_REQUESTS_PER_MINUTE,
+    val corsAllowedOrigins: List<String> = listOf(DEFAULT_CORS_ALLOWED_ORIGIN),
+    val enableIpWhitelist: Boolean = false,
+    val ipWhitelist: List<String> = emptyList(),
 ) {
     val isReady: Boolean = upstreamUrl.isNotBlank() && apiKey.isNotBlank()
 
@@ -35,5 +38,8 @@ data class ServerConfig(
 
         /** Default per-IP request budget for token-bucket rate limiting. */
         const val DEFAULT_MAX_REQUESTS_PER_MINUTE = 60
+
+        /** Default CORS policy allows all origins for backward compatibility in local mode. */
+        const val DEFAULT_CORS_ALLOWED_ORIGIN = "*"
     }
 }

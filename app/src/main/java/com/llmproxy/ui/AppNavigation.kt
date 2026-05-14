@@ -127,6 +127,9 @@ fun LlmProxyApp(
                     onBearerTokenChanged = viewModel::onBearerTokenChanged,
                     onRequireBearerAuthChanged = viewModel::onRequireBearerAuthChanged,
                     onMaxRequestsPerMinuteChanged = viewModel::onMaxRequestsPerMinuteChanged,
+                    onCorsAllowedOriginsChanged = viewModel::onCorsAllowedOriginsChanged,
+                    onEnableIpWhitelistChanged = viewModel::onEnableIpWhitelistChanged,
+                    onIpWhitelistChanged = viewModel::onIpWhitelistChanged,
                 )
             }
         }
